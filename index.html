@@ -274,6 +274,28 @@ table.lista tr:last-child td{border-bottom:none}
 .aviso.info{background:#eef2f7;color:var(--grafite)}
 .aviso.erro{background:var(--vermelho-suave);color:var(--vermelho)}
 
+/* ---------- ANEXAR DOCUMENTOS ---------- */
+.linha-anexo{
+  display:grid;grid-template-columns:4px 1fr 60px 110px;align-items:center;gap:14px;
+  padding:0 16px 0 0;border-bottom:1px solid #eef0f3;cursor:pointer;
+}
+.linha-anexo:last-child{border-bottom:none}
+.linha-anexo:hover{background:#fafbfc}
+.linha-anexo > div:nth-child(2){padding:12px 0}
+.pills{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.pill{
+  font-size:10px;letter-spacing:.08em;font-weight:600;padding:3px 7px;border-radius:2px;
+  border:1px solid transparent;white-space:nowrap;
+}
+.pill.falta{background:var(--vermelho-suave);color:var(--vermelho);border-color:rgba(200,54,43,.25)}
+.pill.anexado{background:var(--ambar-suave);color:var(--ambar);border-color:rgba(201,138,16,.25)}
+.pill.aprovado{background:var(--verde-suave);color:var(--verde);border-color:rgba(28,138,84,.25)}
+.linha-tipo{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.linha-tipo .entrada{flex:1;max-width:340px}
+@media(max-width:820px){
+  .linha-anexo{grid-template-columns:4px 1fr auto;padding-right:12px}
+}
+
 /* ---------- IMPORTAÇÃO ---------- */
 .solta{
   border:1px dashed var(--linha-forte);border-radius:3px;padding:32px 20px;text-align:center;
@@ -410,13 +432,14 @@ const S = {
   filiais:[], usuarios:[], funcionarios:[], documentos:[], prazos:[],
   config:{diaLimite:'10', tiposObrigatorios:['HOLERITE','VALE','VR','VT','CARTAO PONTO']},
   competencia: hojeCompetencia(),
-  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'',
+  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ cfg:{jornada:'07:20', tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA'},
        resultados:[] }
 };
 
 const ROTULO_ABA = {
+  ANEXAR:'Anexar documentos',
   FUNCIONARIOS:'Funcionários',
   EX_FUNCIONARIOS:'Ex-funcionários',
   PENDENCIAS:'Pendências',
@@ -525,6 +548,7 @@ async function recarregar(){
     S.funcionarios = d.funcionarios;
     S.documentos = d.documentos;
     S.prazos = d.prazos;
+    S.tiposEdit = null;
     S.config = {
       diaLimite: d.config.diaLimite || '10',
       tiposObrigatorios: (d.config.tiposObrigatorios && d.config.tiposObrigatorios.length)
@@ -591,11 +615,13 @@ function desenhar(){
   nav.querySelectorAll('.aba').forEach(b=> b.onclick = ()=>{ S.aba=b.dataset.aba; desenhar(); });
 
   const c = document.getElementById('conteudo');
-  if(S.aba==='FUNCIONARIOS') c.innerHTML = telaFuncionarios();
+  if(S.aba==='ANEXAR') c.innerHTML = telaAnexar();
+  else if(S.aba==='FUNCIONARIOS') c.innerHTML = telaFuncionarios();
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   ligarEventos();
+  if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
 }
 
@@ -1295,10 +1321,12 @@ function subAdmin(el, qual){
   if(qual==='usuarios'){
     c.innerHTML = `
       <div class="aviso info">O usuário <b>MASTER</b> entra apenas com a senha master e enxerga tudo.
-      O usuário com papel <b>Gerente RH</b> é quem confirma a qualidade das fotos (amarelo → verde).</div>
+      O <b>Gerente RH</b> confirma a qualidade das fotos (amarelo → verde).
+      Para o gerente de loja, escolha o papel <b>Gerente de filial</b>, informe a filial dele e marque
+      só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.</div>
       <table class="lista"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>Abas visíveis</th><th></th></tr></thead><tbody id="tbUsers">
       ${S.usuarios.map(u=>linhaUsuario(u)).join('')}
-      ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'FUNCIONARIOS', ativo:'SIM'}, true)}
+      ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'ANEXAR', ativo:'SIM'}, true)}
       </tbody></table>`;
     ligarUsuarios(c, el, qual);
   }
@@ -1366,7 +1394,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -1416,6 +1444,164 @@ async function acao(nome, dados, el, qual, msg){
     await recarregar();
     subAdmin(el, qual);
     toast(msg);
+  }catch(e){ toast(e.message,true); }
+  finally{ carregando(false); }
+}
+
+/* ==================================================================
+   ABA ANEXAR DOCUMENTOS
+   Tela dos gerentes de filial: só os funcionários da própria loja,
+   com o que falta anexar no mês em destaque.
+   ================================================================== */
+function telaAnexar(){
+  const tipos = S.config.tiposObrigatorios;
+  const ativos = S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+
+  const mostraFiltro = podeAprovar();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    ${mostraFiltro?`<select class="campo" id="campoFilial">${ops.join('')}</select>`:''}
+  </div>
+  <div class="aviso info">
+    Anexe os documentos de <b>${compBonita(S.competencia)}</b> até <b>${dataBonita(prazoDaCompetencia())}</b>.
+    Para trocar o mês, use o campo Competência no alto da tela.
+    ${S.sessao.papel==='GERENTE'&&S.sessao.filial?` Você anexa os documentos da filial <b>${esc(S.sessao.filial)}</b>.`:''}
+  </div>`;
+
+  if(!ativos.length){
+    html += vazio('Nenhum funcionário nesta filial',
+      'Fale com o RH para incluir os funcionários da sua loja no sistema.');
+  }else{
+    const faltando = ativos.filter(f=>situacao(f)==='vermelho').length;
+    html += `
+    <section class="filial">
+      <div class="filial-topo">
+        <div>
+          <div class="filial-nome">${ativos.length} ${ativos.length===1?'funcionário':'funcionários'}</div>
+          <div class="filial-qtd">${faltando? faltando+' com documento faltando' : 'tudo anexado neste mês'}</div>
+        </div>
+      </div>
+      ${ativos.map(f=>linhaAnexo(f, tipos)).join('')}
+    </section>`;
+  }
+
+  if(podeAprovar()) html += painelTipos();
+  return html;
+}
+
+function linhaAnexo(f, tipos){
+  const cor = situacao(f);
+  const meus = docsDe(f.id, S.competencia);
+  const anexados = tipos.filter(t=>meus.find(d=>d.tipo===t)).length;
+  const pills = tipos.map(t=>{
+    const d = meus.find(x=>x.tipo===t);
+    const estado = !d ? 'falta' : d.status==='APROVADO' ? 'aprovado' : 'anexado';
+    return `<span class="pill ${estado}">${esc(t)}</span>`;
+  }).join('');
+  return `
+  <div class="linha-anexo" data-docs="${f.id}">
+    <div class="marcador m-${cor}"></div>
+    <div>
+      <div class="nome c-${cor}" style="padding:0">${esc(f.nome)}</div>
+      <div class="pills">${pills}</div>
+    </div>
+    <div class="cel mono esconde-mob" style="text-align:right">${anexados}/${tipos.length}</div>
+    <div class="acoes"><button class="btn sec mini" tabindex="-1">Anexar</button></div>
+  </div>`;
+}
+
+function painelTipos(){
+  if(!S.tiposEdit) S.tiposEdit = S.config.tiposObrigatorios.slice();
+  return `
+  <section class="filial" style="margin-top:18px">
+    <div class="filial-topo">
+      <div>
+        <div class="filial-nome">Documentos exigidos todo mês</div>
+        <div class="filial-qtd">Vale para todas as filiais · só RH e master editam</div>
+      </div>
+    </div>
+    <div style="padding:16px">
+      <div id="listaTipos">
+        ${S.tiposEdit.map((t,i)=>`
+        <div class="linha-tipo">
+          <span class="mono" style="color:var(--apagado);width:18px">${i+1}</span>
+          <input class="entrada" data-tipo="${i}" data-original="${esc(t)}" value="${esc(t)}"
+                 placeholder="Nome do documento">
+          <button class="link-acao rem" data-tipo-remover="${i}">Excluir</button>
+        </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn sec" id="tipoAdicionar">+ Adicionar documento</button>
+        <button class="btn" id="tipoSalvar">Salvar lista</button>
+        <button class="btn sec" id="tipoDesfazer">Desfazer</button>
+      </div>
+      <div class="prazo" style="margin-top:12px;font-size:12px;color:var(--apagado)">
+        Ao renomear, os arquivos já anexados são renomeados junto no Drive.
+        Ao excluir, o documento deixa de ser cobrado, mas o que já foi enviado continua guardado.
+      </div>
+    </div>
+  </section>`;
+}
+
+function ligarAnexar(){
+  document.querySelectorAll('.linha-anexo').forEach(l=>
+    l.onclick = ()=>abrirDocumentos(l.dataset.docs));
+
+  const b = id => document.getElementById(id);
+  if(b('tipoAdicionar')) b('tipoAdicionar').onclick = ()=>{
+    lerTiposDaTela();
+    S.tiposEdit.push('');
+    desenhar();
+    const campos = document.querySelectorAll('[data-tipo]');
+    if(campos.length) campos[campos.length-1].focus();
+  };
+  if(b('tipoDesfazer')) b('tipoDesfazer').onclick = ()=>{
+    S.tiposEdit = null; desenhar(); toast('Lista restaurada.');
+  };
+  if(b('tipoSalvar')) b('tipoSalvar').onclick = salvarTipos;
+  document.querySelectorAll('[data-tipo-remover]').forEach(x=> x.onclick = ()=>{
+    lerTiposDaTela();
+    S.tiposEdit.splice(+x.dataset.tipoRemover, 1);
+    desenhar();
+  });
+}
+
+function lerTiposDaTela(){
+  const campos = [...document.querySelectorAll('[data-tipo]')];
+  if(campos.length) S.tiposEdit = campos.map(c=>c.value);
+}
+
+async function salvarTipos(){
+  const campos = [...document.querySelectorAll('[data-tipo]')];
+  const tipos = campos.map(c=>c.value.toUpperCase().trim()).filter(Boolean);
+  if(!tipos.length) return toast('Deixe pelo menos um documento na lista.', true);
+
+  const renomear = campos
+    .map(c=>({de:c.dataset.original.toUpperCase().trim(), para:c.value.toUpperCase().trim()}))
+    .filter(r=> r.de && r.para && r.de!==r.para);
+
+  if(renomear.length){
+    const lista = renomear.map(r=>r.de+' → '+r.para).join('\n');
+    if(!confirm('Renomear e ajustar os arquivos já anexados?\n\n'+lista)) return;
+  }
+  carregando(true);
+  try{
+    const r = await api('salvarTipos', {tipos, renomear});
+    S.tiposEdit = null;
+    await recarregar();
+    toast('Lista salva' + (r.renomeados ? ' · '+r.renomeados+' arquivos renomeados' : '') + '.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
