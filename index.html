@@ -97,13 +97,17 @@ header{
 .marca span{font-size:11px;font-weight:600;letter-spacing:.2em;color:var(--apagado);border-left:1px solid var(--linha);padding-left:11px}
 .topo-espaco{flex:1}
 .comp-campo{
-  display:flex;align-items:center;gap:8px;background:#f6f7f9;
-  border:1px solid var(--linha);border-radius:2px;padding:5px 10px;
+  display:flex;align-items:center;gap:10px;background:#f6f7f9;flex:none;
+  border:1px solid var(--linha);border-radius:2px;padding:5px 12px 5px 10px;
 }
-.comp-campo label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--apagado)}
+.comp-campo label{
+  font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--apagado);
+  white-space:nowrap;flex:none;
+}
 .comp-campo input{
   background:transparent;border:none;color:var(--tinta);font-size:14px;
-  font-family:'JetBrains Mono',monospace;width:130px;
+  font-family:'JetBrains Mono',monospace;
+  width:auto;min-width:118px;max-width:none;flex:none;padding:2px 0;
 }
 .comp-campo input::-webkit-calendar-picker-indicator{opacity:.55;cursor:pointer}
 .quem{text-align:right;line-height:1.15}
@@ -291,6 +295,8 @@ table.lista tr:last-child td{border-bottom:none}
 .tag.novo{background:var(--verde-suave);color:var(--verde)}
 .tag.atual{background:#eef2f7;color:var(--grafite)}
 .tag.dup{background:var(--ambar-suave);color:var(--ambar)}
+button.tag.dup{cursor:pointer;border:1px solid rgba(201,138,16,.35)}
+button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar)}
 .tag.erro{background:var(--vermelho-suave);color:var(--vermelho)}
 .resumo-imp{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px}
 .resumo-imp div{font-size:12px;color:var(--apagado)}
@@ -329,6 +335,7 @@ table.lista tr:last-child td{border-bottom:none}
   .acoes{grid-column:3}
   .topo{flex-wrap:wrap;gap:10px}
   .comp-campo{order:3;width:100%}
+  .comp-campo input{flex:1;min-width:0}
   .semaforo{width:110px}
   .semaforo-legenda{display:none}
   .grade{grid-template-columns:1fr}
@@ -781,8 +788,10 @@ function modal(html, larga){
 /* ==================================================================
    CADASTRO DE FUNCIONÁRIO
    ================================================================== */
-function abrirFuncionario(id){
-  const f = id ? S.funcionarios.find(x=>x.id===id) : {nome:'',filial:'',cargo:'',dataAdmissao:'',dataDemissao:'',status:'EMPREGADO',observacoes:''};
+function abrirFuncionario(id, extra){
+  const f = id ? S.funcionarios.find(x=>x.id===id)
+    : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataDemissao:'',status:'EMPREGADO',observacoes:''},
+                    (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
     <div class="modal-topo">
@@ -791,6 +800,7 @@ function abrirFuncionario(id){
     </div>
     <div class="modal-corpo">
       <div id="fErro"></div>
+      ${(extra && extra.aviso) ? `<div class="aviso info">${esc(extra.aviso)}</div>` : ''}
       <div class="grade">
         <div class="full"><label class="campo-lbl" for="fNome">Nome completo</label>
           <input class="entrada" id="fNome" value="${esc(f.nome)}" placeholder="Nome como consta no holerite"></div>
@@ -841,9 +851,10 @@ function abrirFuncionario(id){
     }
     carregando(true);
     try{
-      await api('salvarFuncionario', {funcionario:dados});
+      const r = await api('salvarFuncionario', {funcionario:dados});
       el.remove();
       await recarregar();
+      if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
       toast(dados.status==='DEMITIDO' ? 'Funcionário movido para Ex-funcionários.' : 'Cadastro salvo.');
     }catch(e){ toast(e.message,true); }
     finally{ carregando(false); }
@@ -1882,7 +1893,8 @@ function tabelaHoras(){
         <th>HE 50%</th><th>HE 100%</th><th>Ad. noturno</th><th>Atrasos</th><th>Faltas</th>
       </tr></thead><tbody>
       ${rs.map((r,i)=>`<tr style="cursor:pointer" data-he="${i}">
-        <td><b>${esc(r.nome)}</b>${r.funcionarioId?'':' <span class="tag dup">Não cadastrado</span>'}</td>
+        <td><b>${esc(r.nome)}</b>${r.funcionarioId?'':
+          ` <button class="tag dup" data-cadastrar="${i}" title="Cadastrar este funcionário">Não cadastrado</button>`}</td>
         <td>${esc(r.filial||'—')}</td>
         <td class="mono">${esc(r.periodoIni)} a ${esc(r.periodoFim)}</td>
         <td class="mono">${minParaHora(r.ap.trabalhado)}</td>
@@ -1924,6 +1936,10 @@ function ligarHorasExtras(){
   if(b('heSalvas')) b('heSalvas').onclick = verApuracoesSalvas;
   document.querySelectorAll('[data-he]').forEach(tr=>
     tr.onclick = ()=>detalheHoras(+tr.dataset.he));
+  document.querySelectorAll('[data-cadastrar]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation();
+    cadastrarDoCartao(+b.dataset.cadastrar);
+  });
 }
 
 async function importarCartoes(arquivos){
@@ -1999,6 +2015,29 @@ function detalheHoras(i){
       </div>
     </div>`, true);
   return el;
+}
+
+function cadastrarDoCartao(i){
+  const r = S.he.resultados[i];
+  abrirFuncionario(null, {
+    inicial: {
+      nome: r.nome,
+      cargo: r.cargo || '',
+      filial: S.filtroFilial !== 'TODAS' ? S.filtroFilial : ''
+    },
+    aviso: 'Dados vindos do cartão ponto ' + r.arquivo + '. Escolha a filial e confira a data de admissão.',
+    aoSalvar: novoId=>{
+      const f = S.funcionarios.find(x=>x.id===novoId);
+      if(f){
+        S.he.resultados.forEach(x=>{
+          if(normalizar(x.nome) === normalizar(f.nome)){
+            x.funcionarioId = f.id; x.filial = f.filial; x.cargo = f.cargo || x.cargo;
+          }
+        });
+      }
+      desenhar();
+    }
+  });
 }
 
 /* ---------- exportações ---------- */
