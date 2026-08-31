@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.08.31d';
+  const VERSAO_APP = '2026.08.31e';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -878,6 +878,7 @@ function dadosDaLinha(f){
   const campos = [];
   campos.push(`<span class="d-forte">${esc(f.filial||'sem filial')}</span>`);
   if(f.cargo) campos.push(esc(f.cargo));
+  if(f.dataInicio) campos.push(`início <span class="mono">${dataBonita(f.dataInicio)}</span>`);
   if(fil && fil.cnpj) campos.push(`CNPJ <span class="mono">${esc(fil.cnpj)}</span>`);
   if(f.cpf) campos.push(`CPF <span class="mono">${esc(f.cpf)}</span>`);
 
@@ -1025,8 +1026,8 @@ function modal(html, larga){
    ================================================================== */
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
-    : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataDemissao:'',status:'EMPREGADO',
-                     observacoes:'',cpf:'',banco:'',agencia:'',conta:''},
+    : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
+                     status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:''},
                     (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
@@ -1046,6 +1047,8 @@ function abrirFuncionario(id, extra){
           <input class="entrada" id="fCargo" value="${esc(f.cargo)}"></div>
         <div><label class="campo-lbl" for="fAdm">Data de admissão</label>
           <input class="entrada" type="date" id="fAdm" value="${esc(f.dataAdmissao)}"></div>
+        <div><label class="campo-lbl" for="fIni">Início</label>
+          <input class="entrada" type="date" id="fIni" value="${esc(f.dataInicio||'')}"></div>
         <div><label class="campo-lbl" for="fStatus">Status</label>
           <select class="entrada" id="fStatus">
             <option value="EMPREGADO" ${f.status!=='DEMITIDO'?'selected':''}>Empregado</option>
@@ -1097,6 +1100,7 @@ function abrirFuncionario(id, extra){
       filial: el.querySelector('#fFilial').value,
       cargo: el.querySelector('#fCargo').value.trim(),
       dataAdmissao: el.querySelector('#fAdm').value,
+      dataInicio: el.querySelector('#fIni').value,
       cpf: el.querySelector('#fCpf').value.trim(),
       banco: el.querySelector('#fBanco').value.trim(),
       agencia: el.querySelector('#fAgencia').value.trim(),
@@ -1770,6 +1774,7 @@ const COLS_CONT = [
   {campo:'atrasos',    titulo:'ATRASOS',           tipo:'hora',    puxa:true},
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
+  {campo:'vt',         titulo:'VT',                tipo:'dinheiro'},
   {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro'},
   {campo:'premiacao',  titulo:'PREMIAÇÃO',         tipo:'dinheiro'}
 ];
@@ -2218,6 +2223,7 @@ const COLUNAS = [
   {campo:'filial',       nomes:['FILIAL','LOJA','UNIDADE']},
   {campo:'cargo',        nomes:['CARGO','FUNCAO','FUNÇÃO']},
   {campo:'dataAdmissao', nomes:['DATA ADMISSAO','DATA DE ADMISSAO','ADMISSAO','DATA ADMISSÃO','DATA DE ADMISSÃO','ADMISSÃO']},
+  {campo:'dataInicio',   nomes:['INICIO','INÍCIO','DATA INICIO','DATA INÍCIO','DATA DE INICIO','DATA DE INÍCIO']},
   {campo:'dataDemissao', nomes:['DATA DEMISSAO','DATA DE DEMISSAO','DEMISSAO','DATA DEMISSÃO','DATA DE DEMISSÃO','DEMISSÃO']},
   {campo:'status',       nomes:['STATUS','SITUACAO','SITUAÇÃO']},
   {campo:'cpf',          nomes:['CPF']},
@@ -2294,13 +2300,13 @@ function passoArquivo(el){
 async function baixarModelo(){
   await usar('xlsx');
   const dados = [
-    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','OBSERVAÇÕES'],
-    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','Banco de horas em acordo'],
-    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','EMPREGADO','','','','',''],
-    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','DEMITIDO','','','','','Pediu demissão']
+    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','INÍCIO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','OBSERVAÇÕES'],
+    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','15/01/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','Banco de horas em acordo'],
+    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','','EMPREGADO','','','','',''],
+    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','','DEMITIDO','','','','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:40}];
+  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
@@ -2348,6 +2354,7 @@ async function lerPlanilha(el, arq){
         nome, filial,
         cargo: String(pega('cargo')||'').trim(),
         dataAdmissao: lerData(pega('dataAdmissao')),
+        dataInicio: lerData(pega('dataInicio')),
         dataDemissao: lerData(pega('dataDemissao')),
         status: String(pega('status')||'').toUpperCase().includes('DEMIT') ? 'DEMITIDO' : 'EMPREGADO',
         cpf: String(pega('cpf')||'').trim(), banco: String(pega('banco')||'').trim(),
@@ -2404,7 +2411,7 @@ function passoPrevia(el, linhas, nomeArq, filiais){
     <div class="previa">
       <table><thead><tr>
         <th>Linha</th><th>Situação</th><th>Nome</th><th>Filial</th><th>Cargo</th>
-        <th>Admissão</th><th>Status</th><th>Observações</th></tr></thead><tbody>
+        <th>Admissão</th><th>Início</th><th>Status</th><th>Observações</th></tr></thead><tbody>
       ${linhas.map(l=>`<tr>
         <td class="mono" style="color:var(--apagado)">${l.linha}</td>
         <td><span class="tag ${l.situacao}">${l.situacao==='novo'?'Novo':l.situacao==='dup'?'Já existe':'Erro'}</span>
@@ -2413,6 +2420,7 @@ function passoPrevia(el, linhas, nomeArq, filiais){
         <td>${esc(l.filial)||'—'}</td>
         <td>${esc(l.cargo)||'—'}</td>
         <td class="mono">${dataBonita(l.dataAdmissao)}</td>
+        <td class="mono">${dataBonita(l.dataInicio)}</td>
         <td>${l.status==='DEMITIDO'?'Demitido':'Empregado'}</td>
         <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${esc(l.observacoes)}</td>
       </tr>`).join('')}
@@ -2443,7 +2451,7 @@ async function executarImportacao(el, linhas, duplicados){
       const r = await api('importarFuncionarios', {
         linhas: linhas.slice(i, i+lote).map(l=>({
           linha:l.linha, nome:l.nome, filial:l.filial, cargo:l.cargo,
-          dataAdmissao:l.dataAdmissao, dataDemissao:l.dataDemissao,
+          dataAdmissao:l.dataAdmissao, dataInicio:l.dataInicio, dataDemissao:l.dataDemissao,
           status:l.status, observacoes:l.observacoes,
           cpf:l.cpf, banco:l.banco, agencia:l.agencia, conta:l.conta
         })),
