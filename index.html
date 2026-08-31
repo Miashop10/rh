@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.08.31e';
+  const VERSAO_APP = '2026.09.01';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -193,18 +193,6 @@ select.campo,input.campo{
 .nome.c-vermelho{color:var(--vermelho)} .nome.c-ambar{color:var(--ambar)}
 .nome.c-verde{color:var(--verde)} .nome.c-neutro{color:var(--tinta)}
 .nome small{display:block;font-weight:400;font-size:12px;color:var(--apagado);letter-spacing:0}
-.dados-func{
-  display:flex;flex-wrap:wrap;align-items:baseline;gap:0 7px;margin-top:5px;
-  font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--grafite);line-height:1.7;
-}
-.dados-func i{color:#c2c8d0;font-style:normal}
-.dados-func .mono{font-size:11px}
-.dados-func .d-forte{font-weight:600}
-.dados-func .d-falta{color:var(--ambar)}
-.dados-obs{
-  font-size:11.5px;font-weight:400;letter-spacing:0;color:var(--apagado);font-style:italic;
-  margin-top:2px;max-width:60ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
 .selo{
   display:inline-block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
   padding:3px 7px;border-radius:2px;font-weight:600;
@@ -303,6 +291,38 @@ table.lista tr:last-child td{border-bottom:none}
 .aviso{padding:11px 13px;border-radius:2px;font-size:13px;margin-bottom:14px}
 .aviso.info{background:#eef2f7;color:var(--grafite)}
 .aviso.erro{background:var(--vermelho-suave);color:var(--vermelho)}
+
+/* ---------- LISTA COMPACTA DE FUNCIONÁRIOS ---------- */
+.rolagem{overflow-x:auto}
+.tab-func{width:100%;border-collapse:collapse;font-size:13px;min-width:1080px}
+.tab-func th{
+  position:sticky;top:0;background:#f6f7f9;text-align:left;padding:7px 10px;
+  font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--apagado);
+  font-weight:700;border-bottom:1px solid var(--linha);white-space:nowrap;z-index:2;
+}
+.tab-func td{
+  padding:4px 10px;border-bottom:1px solid #f1f3f5;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.tab-func tr:last-child td{border-bottom:none}
+.tab-func tbody tr:hover{background:#fafbfc}
+.tab-func .t-nome{font-weight:600;max-width:290px}
+.tab-func .t-filial{color:var(--grafite);font-weight:600;max-width:130px}
+.tab-func .t-apagado{color:var(--apagado);max-width:150px}
+.tab-func .t-banco{font-size:11.5px;max-width:210px}
+.tab-func .t-obs{color:var(--apagado);font-style:italic;font-size:12px;max-width:230px}
+.tab-func .d-falta{color:var(--ambar);font-style:italic}
+.tab-func .selo{padding:2px 6px}
+.tab-func .btn.mini{padding:4px 9px;font-size:11.5px}
+.bolinha{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  margin-right:8px;vertical-align:1px;flex:none;
+}
+@media(max-width:820px){
+  .tab-func{min-width:760px}
+  .tab-func .t-apagado,.tab-func .t-obs{display:none}
+  .tab-func th:nth-child(3),.tab-func th:nth-child(4),.tab-func th:nth-child(10){display:none}
+}
 
 /* ---------- CONTABILIDADE ---------- */
 .tab-cont{min-width:1180px}
@@ -828,96 +848,70 @@ function filtrar(lista){
 /* ---------- ABA 1: FUNCIONÁRIOS ---------- */
 function telaFuncionarios(){
   const ativos = filtrar(S.funcionarios.filter(f=>f.status!=='DEMITIDO'))
-    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
-
-  const grupos = {};
-  ativos.forEach(f=>{ (grupos[f.filial] = grupos[f.filial]||[]).push(f); });
-  const nomes = Object.keys(grupos).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
 
   let html = barraFiltros(true);
-  html += `<div class="aviso info">
-    Competência <b>${compBonita(S.competencia)}</b> · prazo para anexar até <b>${dataBonita(prazoDaCompetencia())}</b>.
-    Vermelho = falta documento · Amarelo = anexado, aguardando conferência · Verde = conferido pelo RH.
+  const cont = {vermelho:0, ambar:0, verde:0, neutro:0};
+  ativos.forEach(f=> cont[situacao(f)]++);
+
+  html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span>Competência <b>${compBonita(S.competencia)}</b> · prazo <b>${dataBonita(prazoDaCompetencia())}</b></span>
+    <span style="margin-left:auto;display:flex;gap:14px;font-size:12px">
+      <span style="color:var(--vermelho)"><b>${cont.vermelho}</b> falta documento</span>
+      <span style="color:var(--ambar)"><b>${cont.ambar}</b> a conferir</span>
+      <span style="color:var(--verde)"><b>${cont.verde}</b> conferido</span>
+      <span style="color:var(--apagado)"><b>${ativos.length}</b> no total</span>
+    </span>
   </div>`;
 
-  if(!nomes.length) return html + vazio('Nenhum funcionário encontrado','Cadastre o primeiro funcionário ou ajuste a busca.');
+  if(!ativos.length) return html + vazio('Nenhum funcionário encontrado',
+    'Cadastre o primeiro funcionário ou ajuste a busca.');
 
-  nomes.forEach(fil=>{
-    const lista = grupos[fil];
-    const cont = {vermelho:0, ambar:0, verde:0, neutro:0};
-    lista.forEach(f=> cont[situacao(f)]++);
-    const tot = lista.length || 1;
-    html += `
-    <section class="filial">
-      <div class="filial-topo">
-        <div>
-          <div class="filial-nome">${esc(fil||'SEM FILIAL')}</div>
-          <div class="filial-qtd">${lista.length} ${lista.length===1?'funcionário':'funcionários'}</div>
-        </div>
-        <div class="semaforo-legenda" style="margin-left:auto">
-          <span style="color:var(--vermelho)"><b>${cont.vermelho}</b> pendentes</span>
-          <span style="color:var(--ambar)"><b>${cont.ambar}</b> a conferir</span>
-          <span style="color:var(--verde)"><b>${cont.verde}</b> ok</span>
-        </div>
-        <div class="semaforo" title="Situação dos documentos de ${compBonita(S.competencia)}">
-          <i style="background:var(--vermelho);width:${cont.vermelho/tot*100}%"></i>
-          <i style="background:var(--ambar);width:${cont.ambar/tot*100}%"></i>
-          <i style="background:var(--verde);width:${cont.verde/tot*100}%"></i>
-          <i style="background:#dfe3e8;width:${cont.neutro/tot*100}%"></i>
-        </div>
-      </div>
-      ${lista.map(f=>linhaFuncionario(f)).join('')}
-    </section>`;
-  });
+  html += `<div class="painel" style="padding:0"><div class="rolagem">
+    <table class="tab-func"><thead><tr>
+      <th>Filial</th><th>Funcionário</th><th>Cargo</th><th>Início</th><th>Admissão</th>
+      <th>Dados bancários</th><th>Situação</th><th colspan="2"></th><th>Observações</th>
+    </tr></thead><tbody>
+    ${ativos.map(f=>linhaFuncionario(f)).join('')}
+    </tbody></table></div></div>`;
   return html;
 }
 
-/* segunda linha do funcionário: filial, dados bancários, CNPJ e observações */
-function dadosDaLinha(f){
-  const fil = S.filiais.find(x=>x.nome===f.filial);
-  const campos = [];
-  campos.push(`<span class="d-forte">${esc(f.filial||'sem filial')}</span>`);
-  if(f.cargo) campos.push(esc(f.cargo));
-  if(f.dataInicio) campos.push(`início <span class="mono">${dataBonita(f.dataInicio)}</span>`);
-  if(fil && fil.cnpj) campos.push(`CNPJ <span class="mono">${esc(fil.cnpj)}</span>`);
-  if(f.cpf) campos.push(`CPF <span class="mono">${esc(f.cpf)}</span>`);
-
-  const banco = [];
-  if(f.banco) banco.push(esc(f.banco));
-  if(f.agencia) banco.push(`ag. <span class="mono">${esc(f.agencia)}</span>`);
-  if(f.conta) banco.push(`c/c <span class="mono">${esc(f.conta)}</span>`);
-  if(banco.length) campos.push(banco.join(' '));
-  else campos.push('<span class="d-falta">sem dados bancários</span>');
-
-  let html = `<div class="dados-func">${campos.join('<i>·</i>')}</div>`;
-  if(f.observacoes) html += `<div class="dados-obs" title="${esc(f.observacoes)}">${esc(f.observacoes)}</div>`;
-  return html;
+function bancoResumido(f){
+  const p = [];
+  if(f.banco) p.push(esc(f.banco));
+  if(f.agencia) p.push('ag '+esc(f.agencia));
+  if(f.conta) p.push('c/c '+esc(f.conta));
+  return p.length ? p.join(' ') : '<span class="d-falta">sem dados</span>';
 }
 
 function linhaFuncionario(f){
   const cor = situacao(f);
   const meus = docsDe(f.id, S.competencia);
   const faltam = S.config.tiposObrigatorios.filter(t=>!meus.find(d=>d.tipo===t));
-  const nota = f.status==='DEMITIDO' ? 'Demitido em '+dataBonita(f.dataDemissao)
-    : cor==='vermelho' ? 'Falta: '+faltam.join(', ')
-    : cor==='ambar' ? 'Documentos anexados · aguardando conferência do RH'
+  const nota = cor==='vermelho' ? 'Falta: '+faltam.join(', ')
+    : cor==='ambar' ? 'Anexado · aguardando conferência do RH'
     : cor==='verde' ? 'Documentos conferidos'
     : 'Sem obrigação nesta competência';
-  return `
-  <div class="linha-func">
-    <div class="marcador m-${cor}"></div>
-    <div class="nome c-${cor}">${esc(f.nome)}<small>${esc(nota)}</small>${dadosDaLinha(f)}</div>
-    <div class="cel esconde-mob">${esc(f.filial)}</div>
-    <div class="cel mono esconde-mob">${dataBonita(f.dataAdmissao)}</div>
-    <div class="esconde-mob"><span class="selo ${f.status==='DEMITIDO'?'dem':'emp'}">${f.status==='DEMITIDO'?'Demitido':'Empregado'}</span></div>
-    <div class="acoes">
-      <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
-      <button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-      </button>
-    </div>
-  </div>`;
+  const fil = S.filiais.find(x=>x.nome===f.filial);
+  const dica = [f.cpf?'CPF '+f.cpf:'', fil&&fil.cnpj?'CNPJ '+fil.cnpj:''].filter(Boolean).join(' · ');
+
+  return `<tr>
+    <td class="t-filial">${esc(f.filial||'—')}</td>
+    <td class="t-nome" title="${esc(nota)}">
+      <span class="bolinha p-${cor}"></span><span class="c-${cor}">${esc(f.nome)}</span></td>
+    <td class="t-apagado">${esc(f.cargo||'—')}</td>
+    <td class="mono t-apagado">${dataBonita(f.dataInicio)}</td>
+    <td class="mono">${dataBonita(f.dataAdmissao)}</td>
+    <td class="t-banco mono" title="${esc(dica)}">${bancoResumido(f)}</td>
+    <td><span class="selo ${f.status==='DEMITIDO'?'dem':'emp'}">${f.status==='DEMITIDO'?'Demitido':'Empregado'}</span></td>
+    <td><button class="btn sec mini" data-docs="${f.id}">Documentos</button></td>
+    <td><button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></td>
+    <td class="t-obs" title="${esc(f.observacoes||'')}">${esc(f.observacoes||'')}</td>
+  </tr>`;
 }
 
 /* ---------- ABA 2: EX-FUNCIONÁRIOS ---------- */
