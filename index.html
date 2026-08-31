@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01';
+  const VERSAO_APP = '2026.09.01b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -713,7 +713,6 @@ function aplicarCarga(d){
   S.documentos = d.documentos;
   S.prazos = d.prazos;
   S.versaoServidor = d.versao || '';
-  S.desatualizado = !!(d.versao && d.versao !== VERSAO_APP);
   S.he.calculos = d.calculos || [];
   if(S.cont.competencia && S.cont.competencia !== S.competencia) S.cont.competencia = null;
   if(!S.he.calculos.find(c=>c.id===S.he.calculoId)){
@@ -793,28 +792,12 @@ function desenhar(){
   nav.querySelectorAll('.aba').forEach(b=> b.onclick = ()=>{ S.aba=b.dataset.aba; desenhar(); });
 
   const c = document.getElementById('conteudo');
-  const alerta = S.desatualizado ? `
-    <div class="aviso erro" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:240px">
-        <b>Este computador está com uma versão antiga do sistema.</b><br>
-        Ele tem a ${esc(VERSAO_APP)} e a publicada é a ${esc(S.versaoServidor)}.
-        Algumas abas e correções podem não aparecer.
-      </div>
-      <button class="btn" id="btnAtualizar">Atualizar agora</button>
-    </div>` : '';
-
   if(S.aba==='ANEXAR') c.innerHTML = telaAnexar();
   else if(S.aba==='FUNCIONARIOS') c.innerHTML = telaFuncionarios();
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
-  if(alerta) c.innerHTML = alerta + c.innerHTML;
-  const btnAt = document.getElementById('btnAtualizar');
-  if(btnAt) btnAt.onclick = ()=>{
-    /* a barra de endereço muda, então o navegador e o CDN são obrigados a buscar de novo */
-    location.replace(location.pathname + '?v=' + Date.now());
-  };
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
@@ -882,7 +865,7 @@ function bancoResumido(f){
   const p = [];
   if(f.banco) p.push(esc(f.banco));
   if(f.agencia) p.push('ag '+esc(f.agencia));
-  if(f.conta) p.push('c/c '+esc(f.conta));
+  if(f.conta) p.push((f.tipoConta==='POUPANCA'?'poup. ':'c/c ')+esc(f.conta));
   return p.length ? p.join(' ') : '<span class="d-falta">sem dados</span>';
 }
 
@@ -1021,7 +1004,8 @@ function modal(html, larga){
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
-                     status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:''},
+                     status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:'',
+                     tipoConta:'CORRENTE'},
                     (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
@@ -1061,8 +1045,16 @@ function abrirFuncionario(id, extra){
           <input class="entrada" id="fBanco" value="${esc(f.banco||'')}" placeholder="Nome ou número do banco"></div>
         <div><label class="campo-lbl" for="fAgencia">Agência</label>
           <input class="entrada mono" id="fAgencia" value="${esc(f.agencia||'')}"></div>
-        <div><label class="campo-lbl" for="fConta">Conta</label>
-          <input class="entrada mono" id="fConta" value="${esc(f.conta||'')}" placeholder="Com dígito"></div>
+        <div>
+          <label class="campo-lbl" for="fConta">Conta</label>
+          <div style="display:flex;gap:8px">
+            <input class="entrada mono" id="fConta" value="${esc(f.conta||'')}" placeholder="Com dígito" style="flex:1">
+            <select class="entrada" id="fTipoConta" style="width:120px;flex:none">
+              <option value="CORRENTE" ${f.tipoConta!=='POUPANCA'?'selected':''}>Corrente</option>
+              <option value="POUPANCA" ${f.tipoConta==='POUPANCA'?'selected':''}>Poupança</option>
+            </select>
+          </div>
+        </div>
         <div class="full" id="boxCnpj"></div>
         <div class="full"><label class="campo-lbl" for="fObs">Observações</label>
           <textarea class="entrada" id="fObs" placeholder="Anotações internas do RH">${esc(f.observacoes)}</textarea></div>
@@ -1099,6 +1091,7 @@ function abrirFuncionario(id, extra){
       banco: el.querySelector('#fBanco').value.trim(),
       agencia: el.querySelector('#fAgencia').value.trim(),
       conta: el.querySelector('#fConta').value.trim(),
+      tipoConta: el.querySelector('#fTipoConta').value,
       status: st.value,
       dataDemissao: st.value==='DEMITIDO' ? el.querySelector('#fDem').value : '',
       observacoes: el.querySelector('#fObs').value
@@ -1617,7 +1610,9 @@ function subAdmin(el, qual){
       O <b>Gerente RH</b> confirma a qualidade das fotos (amarelo → verde) e recebe
       automaticamente as abas que forem criadas depois do cadastro dele.
       Para o gerente de loja, escolha o papel <b>Gerente de filial</b>, informe a filial dele e marque
-      só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.</div>
+      só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.<br>
+      As senhas ficam à mostra nesta tela, que só o MASTER abre — evite deixá-la aberta
+      com outras pessoas por perto.</div>
       <table class="lista"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>Abas visíveis</th><th></th></tr></thead><tbody id="tbUsers">
       ${S.usuarios.map(u=>linhaUsuario(u)).join('')}
       ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'ANEXAR', ativo:'SIM'}, true)}
@@ -1667,7 +1662,8 @@ function subAdmin(el, qual){
         <div id="linksBase" style="font-size:13px;color:var(--apagado)">Carregando…</div>
         <div style="font-size:12px;color:var(--apagado);margin-top:10px">
           Versão neste computador: <b class="mono">${esc(VERSAO_APP)}</b> ·
-          publicada: <b class="mono">${esc(S.versaoServidor||'—')}</b>
+          Apps Script publicado: <b class="mono">${esc(S.versaoServidor||'—')}</b><br>
+          Se um computador estiver com tela antiga, abra o endereço com <b>?v=1</b> no fim para forçar a atualização.
         </div></div>`;
     c.querySelector('#sTrocar').onclick = async ()=>{
       const a=c.querySelector('#sNova').value, b=c.querySelector('#sConf').value;
@@ -1697,7 +1693,9 @@ function linhaUsuario(u, novo){
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
       <input class="entrada" data-u="usuario" value="${esc(u.usuario)}" placeholder="${novo?'Novo usuário':''}" style="min-width:130px">
-      <input class="entrada" data-u="senha" type="text" value="" placeholder="${novo?'Senha':'Nova senha (opcional)'}" style="margin-top:6px;min-width:130px">
+      <input class="entrada mono" data-u="senha" type="text" value="${esc(u.senha||'')}"
+             placeholder="${novo?'Senha':''}" autocomplete="off" spellcheck="false"
+             style="margin-top:6px;min-width:130px">
     </td>
     <td><select class="entrada" data-u="papel">
       <option value="GERENTE" ${u.papel==='GERENTE'?'selected':''}>Gerente de filial</option>
@@ -2224,6 +2222,7 @@ const COLUNAS = [
   {campo:'banco',        nomes:['BANCO']},
   {campo:'agencia',      nomes:['AGENCIA','AGÊNCIA','AG']},
   {campo:'conta',        nomes:['CONTA','CONTA CORRENTE','CC']},
+  {campo:'tipoConta',    nomes:['TIPO CONTA','TIPO DE CONTA','TIPO']},
   {campo:'observacoes',  nomes:['OBSERVACOES','OBSERVACAO','OBS','OBSERVAÇÕES','OBSERVAÇÃO','ANOTACOES','ANOTAÇÕES']}
 ];
 
@@ -2294,13 +2293,13 @@ function passoArquivo(el){
 async function baixarModelo(){
   await usar('xlsx');
   const dados = [
-    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','INÍCIO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','OBSERVAÇÕES'],
-    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','15/01/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','Banco de horas em acordo'],
-    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','','EMPREGADO','','','','',''],
-    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','','DEMITIDO','','','','','Pediu demissão']
+    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','INÍCIO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','TIPO CONTA','OBSERVAÇÕES'],
+    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','15/01/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','CORRENTE','Banco de horas em acordo'],
+    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','','EMPREGADO','','','','','POUPANÇA',''],
+    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','','DEMITIDO','','','','','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:40}];
+  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:13},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
@@ -2353,6 +2352,7 @@ async function lerPlanilha(el, arq){
         status: String(pega('status')||'').toUpperCase().includes('DEMIT') ? 'DEMITIDO' : 'EMPREGADO',
         cpf: String(pega('cpf')||'').trim(), banco: String(pega('banco')||'').trim(),
         agencia: String(pega('agencia')||'').trim(), conta: String(pega('conta')||'').trim(),
+        tipoConta: String(pega('tipoConta')||'').toUpperCase().includes('POUP') ? 'POUPANCA' : 'CORRENTE',
         observacoes: String(pega('observacoes')||'').trim()
       };
       item.aviso = '';
@@ -2447,7 +2447,7 @@ async function executarImportacao(el, linhas, duplicados){
           linha:l.linha, nome:l.nome, filial:l.filial, cargo:l.cargo,
           dataAdmissao:l.dataAdmissao, dataInicio:l.dataInicio, dataDemissao:l.dataDemissao,
           status:l.status, observacoes:l.observacoes,
-          cpf:l.cpf, banco:l.banco, agencia:l.agencia, conta:l.conta
+          cpf:l.cpf, banco:l.banco, agencia:l.agencia, conta:l.conta, tipoConta:l.tipoConta
         })),
         duplicados, criarFiliais:true
       });
