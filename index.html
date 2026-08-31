@@ -864,16 +864,27 @@ function linhaFuncionario(f){
 
 /* ---------- ABA 2: EX-FUNCIONÁRIOS ---------- */
 function telaEx(){
-  const ex = filtrar(S.funcionarios.filter(f=>f.status==='DEMITIDO'))
-    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  const ex = filtrar(S.funcionarios.filter(f=>f.status==='DEMITIDO'));
   let html = barraFiltros(false);
-  if(!ex.length) return html + vazio('Nenhum ex-funcionário','Ao alterar o status de alguém para Demitido, o nome aparece aqui.');
-  html += `<section class="filial">
-    <div class="filial-topo">
-      <div><div class="filial-nome">Ex-funcionários</div>
-      <div class="filial-qtd">${ex.length} em ordem alfabética</div></div>
-    </div>
-    ${ex.map(f=>`
+  if(!ex.length) return html + vazio('Nenhum ex-funcionário',
+    'Ao alterar o status de alguém para Demitido, o nome aparece aqui.');
+
+  /* agrupado por filial; dentro de cada uma, em ordem alfabética */
+  const grupos = {};
+  ex.forEach(f=>{ (grupos[f.filial||'SEM FILIAL'] = grupos[f.filial||'SEM FILIAL']||[]).push(f); });
+  const filiais = Object.keys(grupos).sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
+
+  filiais.forEach(fil=>{
+    const lista = grupos[fil].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    html += `
+    <section class="filial">
+      <div class="filial-topo">
+        <div>
+          <div class="filial-nome">${esc(fil)}</div>
+          <div class="filial-qtd">${lista.length} ${lista.length===1?'ex-funcionário':'ex-funcionários'} em ordem alfabética</div>
+        </div>
+      </div>
+      ${lista.map(f=>`
       <div class="linha-func">
         <div class="marcador m-neutro"></div>
         <div class="nome c-neutro">${esc(f.nome)}<small>Admissão ${dataBonita(f.dataAdmissao)} · Demissão ${dataBonita(f.dataDemissao)}</small></div>
@@ -885,7 +896,8 @@ function telaEx(){
           <button class="btn sec mini" data-editar="${f.id}">Editar</button>
         </div>
       </div>`).join('')}
-  </section>`;
+    </section>`;
+  });
   return html;
 }
 
