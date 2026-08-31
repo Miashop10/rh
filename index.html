@@ -286,6 +286,26 @@ table.lista tr:last-child td{border-bottom:none}
 .aviso.info{background:#eef2f7;color:var(--grafite)}
 .aviso.erro{background:var(--vermelho-suave);color:var(--vermelho)}
 
+/* ---------- CONTABILIDADE ---------- */
+.tab-cont{min-width:1180px}
+.tab-cont th{white-space:nowrap;font-size:9px}
+.tab-cont td{padding:5px 6px}
+.tab-cont .col-fixa{
+  position:sticky;left:0;background:#fff;z-index:1;min-width:210px;
+  box-shadow:1px 0 0 var(--linha);
+}
+.tab-cont thead .col-fixa{background:#f6f7f9;z-index:3}
+.tab-cont tfoot .col-fixa{background:#f6f7f9}
+.tab-cont th.col-auto{background:#eef4f0;color:var(--verde)}
+.tab-cont td.col-auto{background:#fafcfb}
+.tab-cont tfoot td{background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px 6px}
+.cel-cont{padding:5px 7px;font-size:13px;width:100%;min-width:82px}
+.cel-cont.dinheiro,.cel-cont.hora,.cel-cont.numero{
+  font-family:'JetBrains Mono',monospace;text-align:right;
+}
+.cel-cont::placeholder{color:#b9c0c8;font-style:italic}
+.cel-cont:focus{background:#fffdf5}
+
 /* ---------- ANEXAR DOCUMENTOS ---------- */
 .linha-anexo{
   display:grid;grid-template-columns:4px 1fr 60px 110px;align-items:center;gap:14px;
@@ -302,6 +322,26 @@ table.lista tr:last-child td{border-bottom:none}
 .pill.falta{background:var(--vermelho-suave);color:var(--vermelho);border-color:rgba(200,54,43,.25)}
 .pill.anexado{background:var(--ambar-suave);color:var(--ambar);border-color:rgba(201,138,16,.25)}
 .pill.aprovado{background:var(--verde-suave);color:var(--verde);border-color:rgba(28,138,84,.25)}
+.foto-ponto{
+  border:1px solid var(--linha);border-radius:3px;background:#f4f6f8;overflow:auto;
+  max-height:300px;display:grid;place-items:center;
+}
+.foto-ponto img{max-width:100%;display:block}
+.foto-ponto.cheia{max-height:none}
+.foto-ponto.cheia img{max-width:none;width:auto}
+.m-batida:focus{background:#fffdf5}
+.mini-sel{padding:5px 7px;font-size:12px;max-width:132px}
+.obs-he{padding:6px 8px;font-size:13px;min-width:180px}
+
+.titulo-grupo{
+  font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  color:var(--grafite);margin:22px 0 10px;display:flex;align-items:baseline;gap:9px;
+}
+.titulo-grupo small{
+  font-size:11px;letter-spacing:0;text-transform:none;font-weight:400;color:var(--apagado);
+}
+.pill.opcional{background:#eef1f4;color:var(--grafite);border-color:var(--linha)}
+.p-neutro{background:#c8ccd3}
 .linha-tipo{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .linha-tipo .entrada{flex:1;max-width:340px}
 @media(max-width:820px){
@@ -475,12 +515,13 @@ document.getElementById('logoTopo').src  = 'data:image/png;base64,' + LOGO_ESCUR
 const S = {
   sessao:null, senha:'', usuario:'',
   filiais:[], usuarios:[], funcionarios:[], documentos:[], prazos:[],
-  config:{diaLimite:'10', tiposObrigatorios:['HOLERITE','VALE','VR','VT','CARTAO PONTO']},
+  config:{diaLimite:'10', tiposObrigatorios:['HOLERITE','VALE','VR','VT','CARTAO PONTO'],
+          tiposOpcionais:[]},
   competencia: hojeCompetencia(),
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
-  he:{ cfg:{jornada:'07:20', tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA'},
-       resultados:[] }
+  he:{ calculos:[], calculoId:'', resultados:[] },
+  cont:{ competencia:null, linhas:{}, apuracoes:[] }
 };
 
 const ROTULO_ABA = {
@@ -488,7 +529,8 @@ const ROTULO_ABA = {
   FUNCIONARIOS:'Funcionários',
   EX_FUNCIONARIOS:'Ex-funcionários',
   PENDENCIAS:'Pendências',
-  HORAS_EXTRAS:'Horas extras'
+  HORAS_EXTRAS:'Horas extras',
+  CONTABILIDADE:'Contabilidade'
 };
 
 /* ==================================================================
@@ -632,11 +674,17 @@ function aplicarCarga(d){
   S.funcionarios = d.funcionarios;
   S.documentos = d.documentos;
   S.prazos = d.prazos;
+  S.he.calculos = d.calculos || [];
+  if(S.cont.competencia && S.cont.competencia !== S.competencia) S.cont.competencia = null;
+  if(!S.he.calculos.find(c=>c.id===S.he.calculoId)){
+    S.he.calculoId = S.he.calculos.length ? S.he.calculos[0].id : '';
+  }
   S.tiposEdit = null;
   S.config = {
     diaLimite: d.config.diaLimite || '10',
     tiposObrigatorios: (d.config.tiposObrigatorios && d.config.tiposObrigatorios.length)
-      ? d.config.tiposObrigatorios : S.config.tiposObrigatorios
+      ? d.config.tiposObrigatorios : S.config.tiposObrigatorios,
+    tiposOpcionais: d.config.tiposOpcionais || []
   };
   if(!S.sessao.abas.includes(S.aba)) S.aba = S.sessao.abas[0] || 'FUNCIONARIOS';
   desenhar();
@@ -710,9 +758,11 @@ function desenhar(){
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
+  else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
+  if(S.aba==='CONTABILIDADE') ligarContabilidade();
 }
 
 function barraFiltros(comBotao){
@@ -1044,8 +1094,9 @@ function desenharDocs(el){
   const f = el._func;
   const comp = S.competencia;
   const tipos = S.config.tiposObrigatorios;
+  const opcionais = S.config.tiposOpcionais;
   const doMes = S.docsLista.filter(d=>d.competencia===comp);
-  const extras = doMes.filter(d=>!tipos.includes(d.tipo));
+  const extras = doMes.filter(d=>!tipos.includes(d.tipo) && !opcionais.includes(d.tipo));
   const outros = S.docsLista.filter(d=>d.competencia!==comp)
     .sort((a,b)=> b.competencia.localeCompare(a.competencia));
 
@@ -1059,12 +1110,20 @@ function desenharDocs(el){
         Filial <b>${esc(f.filial)}</b> · Admissão <b>${dataBonita(f.dataAdmissao)}</b></div>
       <div style="margin-left:auto" class="prazo">Troque o mês no topo da tela para anexar outra competência.</div>
     </div>
+    <div class="titulo-grupo">Obrigatórios do mês</div>
     <div class="grade-docs">`;
 
   tipos.forEach(t=>{
     html += cardDoc(t, doMes.find(d=>d.tipo===t), f);
   });
-  extras.forEach(d=> html += cardDoc(d.tipo, d, f));
+  html += `</div>`;
+
+  html += `<div class="titulo-grupo">Opcionais<small>não entram na cor do nome</small></div>
+    <div class="grade-docs">`;
+  opcionais.forEach(t=>{
+    html += cardDoc(t, doMes.find(d=>d.tipo===t), f, true);
+  });
+  extras.forEach(d=> html += cardDoc(d.tipo, d, f, true));
   html += `
       <div class="card-doc falta">
         <div class="card-doc-topo"><span class="ponto" style="background:#c8ccd3"></span><span class="card-doc-tipo">OUTRO</span></div>
@@ -1100,11 +1159,13 @@ function desenharDocs(el){
   ligarEventosDocs(el);
 }
 
-function cardDoc(tipo, d, f){
+function cardDoc(tipo, d, f, opcional){
   if(!d){
     return `<div class="card-doc falta">
-      <div class="card-doc-topo"><span class="ponto p-vermelho"></span><span class="card-doc-tipo">${esc(tipo)}</span></div>
-      <div class="miniatura sem">Não anexado</div>
+      <div class="card-doc-topo">
+        <span class="ponto ${opcional?'p-neutro':'p-vermelho'}"></span>
+        <span class="card-doc-tipo">${esc(tipo)}</span></div>
+      <div class="miniatura sem">${opcional?'Opcional':'Não anexado'}</div>
       <div class="card-doc-pe"><button class="link-acao" data-anexar="${esc(tipo)}">+ Anexar</button></div>
     </div>`;
   }
@@ -1527,7 +1588,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','CONTABILIDADE'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -1577,6 +1638,273 @@ async function acao(nome, dados, el, qual, msg){
     await recarregar();
     subAdmin(el, qual);
     toast(msg);
+  }catch(e){ toast(e.message,true); }
+  finally{ carregando(false); }
+}
+
+/* ==================================================================
+   ABA CONTABILIDADE
+   Uma linha por funcionário ativo na competência. As colunas de horas
+   extras, adicional noturno, faltas e atrasos vêm da aba Horas extras
+   (do que está na tela ou do que já foi salvo); o resto é digitado.
+   ================================================================== */
+const COLS_CONT = [
+  {campo:'vale',       titulo:'VALE',              tipo:'dinheiro'},
+  {campo:'he50',       titulo:'H. EXTRAS 50%',     tipo:'hora',    puxa:true},
+  {campo:'he100',      titulo:'H. EXTRAS 100%',    tipo:'hora',    puxa:true},
+  {campo:'adNoturno',  titulo:'AD. NOTURNO',       tipo:'hora',    puxa:true},
+  {campo:'faltas',     titulo:'FALTAS',            tipo:'numero',  puxa:true},
+  {campo:'atrasos',    titulo:'ATRASOS',           tipo:'hora',    puxa:true},
+  {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
+  {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
+  {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro'},
+  {campo:'premiacao',  titulo:'PREMIAÇÃO',         tipo:'dinheiro'}
+];
+
+function valorNum(v){
+  const t = String(v==null?'':v).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.');
+  const n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
+function moeda(n){
+  return n.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function somaHoras(lista){
+  return minParaHora(lista.reduce((s,t)=>{
+    const m = String(t||'').match(/^(-?)(\d{1,3}):(\d{2})$/);
+    return s + (m ? (m[1]==='-'?-1:1)*(+m[2]*60 + +m[3]) : 0);
+  }, 0));
+}
+
+/* de onde vem cada valor automático */
+function apuracaoDe(f){
+  const vivo = S.he.resultados.find(r=>
+    (r.funcionarioId && r.funcionarioId===f.id) || normalizar(r.nome)===normalizar(f.nome));
+  if(vivo) return {
+    he50: minParaHora(vivo.ap.he50), he100: minParaHora(vivo.ap.he100),
+    adNoturno: minParaHora(vivo.ap.noturno), faltas: String(vivo.ap.diasFalta),
+    atrasos: minParaHora(vivo.ap.atrasos), origem:'tela'
+  };
+  const salva = (S.cont.apuracoes||[]).find(a=>
+    (a.funcionarioId && a.funcionarioId===f.id) || normalizar(a.nome)===normalizar(f.nome));
+  if(salva) return {
+    he50: salva.he50, he100: salva.he100, adNoturno: salva.adicionalNoturno,
+    faltas: '', atrasos: salva.atrasos, origem:'salva'
+  };
+  return null;
+}
+
+function linhasContabilidade(){
+  return S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR') || a.nome.localeCompare(b.nome,'pt-BR'));
+}
+
+function telaContabilidade(){
+  if(S.cont.competencia !== S.competencia){
+    carregarContabilidade();
+    return `<div class="filial"><div class="vazio">Carregando lançamentos de ${compBonita(S.competencia)}…</div></div>`;
+  }
+  const lista = linhasContabilidade();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <button class="btn sec" id="contPuxar">Puxar horas extras</button>
+    <button class="btn sec" id="contExcel">Excel</button>
+    <button class="btn sec" id="contPdf">PDF</button>
+    <button class="btn" id="contSalvar">Salvar lançamentos</button>
+  </div>
+  <div class="aviso info">
+    Fechamento de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
+    As colunas de horas extras, adicional noturno, faltas e atrasos são preenchidas pela aba
+    Horas extras quando há apuração; as demais são digitadas. Tudo pode ser corrigido à mão.
+  </div>`;
+
+  if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
+
+  html += `<div class="painel" style="padding:0">
+    <div class="previa" style="max-height:none;border:none">
+    <table class="tab-cont"><thead><tr>
+      <th class="col-fixa">Funcionário</th><th>Filial</th>
+      ${COLS_CONT.map(c=>`<th class="${c.puxa?'col-auto':''}">${esc(c.titulo)}</th>`).join('')}
+      <th style="min-width:170px">Observações</th>
+    </tr></thead><tbody>`;
+
+  lista.forEach(f=>{
+    const l = S.cont.linhas[f.id] || {};
+    const ap = apuracaoDe(f);
+    html += `<tr>
+      <td class="col-fixa"><b>${esc(f.nome)}</b></td>
+      <td style="color:var(--apagado)">${esc(f.filial)}</td>
+      ${COLS_CONT.map(c=>`<td class="${c.puxa?'col-auto':''}">
+        <input class="entrada cel-cont ${c.tipo}" data-f="${f.id}" data-campo="${c.campo}"
+               value="${esc(l[c.campo]||'')}"
+               placeholder="${c.puxa && ap && ap[c.campo] ? esc(ap[c.campo]) : ''}"
+               title="${c.puxa && ap ? 'Da apuração: '+esc(ap[c.campo]||'—') : ''}"></td>`).join('')}
+      <td><input class="entrada cel-cont" data-f="${f.id}" data-campo="observacoes"
+                 value="${esc(l.observacoes||'')}" placeholder="Anotação"></td>
+    </tr>`;
+  });
+
+  const soma = campo => lista.map(f=>(S.cont.linhas[f.id]||{})[campo]);
+  html += `</tbody><tfoot><tr>
+      <td class="col-fixa"><b>TOTAL</b></td><td></td>
+      ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
+        c.tipo==='hora' ? somaHoras(soma(c.campo))
+        : c.tipo==='numero' ? String(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+        : moeda(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+      }</b></td>`).join('')}
+      <td></td>
+    </tr></tfoot></table></div></div>`;
+  return html;
+}
+
+async function carregarContabilidade(){
+  carregando(true);
+  try{
+    const d = await api('listarContabilidade', {competencia:S.competencia});
+    S.cont.linhas = {};
+    d.linhas.forEach(l=>{ S.cont.linhas[l.funcionarioId] = l; });
+    S.cont.apuracoes = d.apuracoes;
+    S.cont.competencia = S.competencia;
+    desenhar();
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function ligarContabilidade(){
+  document.querySelectorAll('.cel-cont').forEach(c=>{
+    c.oninput = ()=>{
+      const l = S.cont.linhas[c.dataset.f] || (S.cont.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
+      l[c.dataset.campo] = c.value;
+    };
+    c.onblur = ()=>{ if(c.classList.contains('dinheiro') && c.value.trim()){
+      c.value = moeda(valorNum(c.value));
+      S.cont.linhas[c.dataset.f][c.dataset.campo] = c.value;
+      desenhar();
+    }};
+  });
+  const b = id => document.getElementById(id);
+  if(b('contPuxar')) b('contPuxar').onclick = puxarHorasExtras;
+  if(b('contSalvar')) b('contSalvar').onclick = salvarContabilidade;
+  if(b('contExcel')) b('contExcel').onclick = exportarContExcel;
+  if(b('contPdf')) b('contPdf').onclick = exportarContPdf;
+}
+
+function puxarHorasExtras(){
+  let n = 0;
+  linhasContabilidade().forEach(f=>{
+    const ap = apuracaoDe(f);
+    if(!ap) return;
+    const l = S.cont.linhas[f.id] || (S.cont.linhas[f.id] = {funcionarioId:f.id});
+    COLS_CONT.filter(c=>c.puxa).forEach(c=>{ if(ap[c.campo]) l[c.campo] = ap[c.campo]; });
+    n++;
+  });
+  desenhar();
+  toast(n ? n+' funcionário(s) preenchido(s) pela apuração.'
+          : 'Nenhuma apuração encontrada para esta competência.', !n);
+}
+
+async function salvarContabilidade(){
+  const lista = linhasContabilidade();
+  const itens = lista.map(f=>{
+    const l = S.cont.linhas[f.id] || {};
+    return Object.assign({funcionarioId:f.id, nome:f.nome, filial:f.filial},
+      Object.fromEntries(COLS_CONT.map(c=>[c.campo, l[c.campo]||''])),
+      {observacoes: l.observacoes||''});
+  }).filter(it=> COLS_CONT.some(c=>it[c.campo]) || it.observacoes);
+
+  if(!itens.length) return toast('Não há nada preenchido para salvar.', true);
+  carregando(true);
+  try{
+    const r = await api('salvarContabilidade', {competencia:S.competencia, itens});
+    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+'.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function tabelaCont(){
+  const lista = linhasContabilidade();
+  const cab = ['FUNCIONÁRIO','FILIAL'].concat(COLS_CONT.map(c=>c.titulo)).concat(['OBSERVAÇÕES']);
+  const linhas = lista.map(f=>{
+    const l = S.cont.linhas[f.id] || {};
+    return [f.nome, f.filial].concat(COLS_CONT.map(c=>l[c.campo]||'')).concat([l.observacoes||'']);
+  });
+  const total = ['TOTAL',''].concat(COLS_CONT.map(c=>{
+    const vals = lista.map(f=>(S.cont.linhas[f.id]||{})[c.campo]);
+    return c.tipo==='hora' ? somaHoras(vals)
+         : c.tipo==='numero' ? String(vals.reduce((s,v)=>s+valorNum(v),0))
+         : moeda(vals.reduce((s,v)=>s+valorNum(v),0));
+  })).concat(['']);
+  return {cab, linhas, total};
+}
+
+async function exportarContExcel(){
+  await usar('xlsx');
+  const {cab, linhas, total} = tabelaCont();
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
+  ws['!cols'] = [{wch:36},{wch:16}].concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'CONTABILIDADE');
+  XLSX.writeFile(wb, 'CONTABILIDADE '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
+}
+
+async function exportarContPdf(){
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+    const {cab, linhas, total} = tabelaCont();
+    const L=841.89, A=595.28, m=26;
+    const larguras = [128, 60].concat(COLS_CONT.map(()=>58));
+    const xs = []; let acc = m;
+    larguras.forEach(w=>{ xs.push(acc); acc += w; });
+
+    let pg, y;
+    const corta = (t,max)=>{ t=String(t||''); return t.length>max?t.slice(0,max-1)+'…':t; };
+    const cabecalho = ()=>{
+      pg = doc.addPage([L,A]); y = A-38;
+      const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
+      pg.drawText('Contabilidade · '+compBonita(S.competencia),
+        {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
+      y -= 44;
+      cab.slice(0, larguras.length).forEach((t,i)=>
+        pg.drawText(corta(t,13),{x:xs[i], y, size:6, font:fonteB, color:rgb(.42,.45,.5)}));
+      y -= 6;
+      pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.7, color:rgb(.8,.83,.86)});
+      y -= 12;
+    };
+    cabecalho();
+    linhas.forEach(l=>{
+      if(y < m+26) cabecalho();
+      l.slice(0, larguras.length).forEach((t,i)=>
+        pg.drawText(corta(t, i===0?26:11),{x:xs[i], y, size:7.5, font:fonte, color:rgb(.06,.07,.08)}));
+      y -= 7;
+      pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
+      y -= 11;
+    });
+    if(y < m+26) cabecalho();
+    y -= 3;
+    total.slice(0, larguras.length).forEach((t,i)=>
+      pg.drawText(corta(t,12),{x:xs[i], y, size:8, font:fonteB}));
+    baixar(new Blob([await doc.save()],{type:'application/pdf'}),
+      'CONTABILIDADE '+compArquivo(S.competencia)+'.pdf');
+    toast('Relatório gerado.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
@@ -1642,7 +1970,10 @@ function linhaAnexo(f, tipos){
     const d = meus.find(x=>x.tipo===t);
     const estado = !d ? 'falta' : d.status==='APROVADO' ? 'aprovado' : 'anexado';
     return `<span class="pill ${estado}">${esc(t)}</span>`;
-  }).join('');
+  }).join('')
+  /* opcionais só aparecem depois de anexados, e nunca em vermelho */
+  + meus.filter(d=>!tipos.includes(d.tipo))
+        .map(d=>`<span class="pill opcional">${esc(d.tipo)}</span>`).join('');
   return `
   <div class="linha-anexo" data-docs="${f.id}">
     <div class="marcador m-${cor}"></div>
@@ -1656,28 +1987,41 @@ function linhaAnexo(f, tipos){
 }
 
 function painelTipos(){
-  if(!S.tiposEdit) S.tiposEdit = S.config.tiposObrigatorios.slice();
+  if(!S.tiposEdit) S.tiposEdit = {
+    ob: S.config.tiposObrigatorios.slice(),
+    op: S.config.tiposOpcionais.slice()
+  };
+  const linha = (t, i, grupo) => `
+    <div class="linha-tipo">
+      <span class="mono" style="color:var(--apagado);width:18px">${i+1}</span>
+      <input class="entrada" data-${grupo}="${i}" data-original="${esc(t)}" value="${esc(t)}"
+             placeholder="Nome do documento">
+      <button class="link-acao rem" data-remover="${grupo}:${i}">Excluir</button>
+    </div>`;
+
   return `
   <section class="filial" style="margin-top:18px">
     <div class="filial-topo">
       <div>
-        <div class="filial-nome">Documentos exigidos todo mês</div>
+        <div class="filial-nome">Documentos que cada filial anexa</div>
         <div class="filial-qtd">Vale para todas as filiais · só RH e master editam</div>
       </div>
     </div>
     <div style="padding:16px">
-      <div id="listaTipos">
-        ${S.tiposEdit.map((t,i)=>`
-        <div class="linha-tipo">
-          <span class="mono" style="color:var(--apagado);width:18px">${i+1}</span>
-          <input class="entrada" data-tipo="${i}" data-original="${esc(t)}" value="${esc(t)}"
-                 placeholder="Nome do documento">
-          <button class="link-acao rem" data-tipo-remover="${i}">Excluir</button>
-        </div>`).join('')}
+      <div class="titulo-grupo" style="margin-top:0">Obrigatórios todo mês
+        <small>faltou um, o nome fica vermelho</small></div>
+      <div id="listaOb">${S.tiposEdit.ob.map((t,i)=>linha(t,i,'ob')).join('')}</div>
+      <button class="btn sec mini" id="obAdicionar" style="margin-top:6px">+ Adicionar obrigatório</button>
+
+      <div class="titulo-grupo">Opcionais
+        <small>anexe quando houver · não afetam a cor do nome</small></div>
+      <div id="listaOp">${S.tiposEdit.op.map((t,i)=>linha(t,i,'op')).join('')}
+        ${S.tiposEdit.op.length?'':'<div class="prazo" style="font-size:13px;color:var(--apagado);margin-bottom:8px">Nenhum documento opcional cadastrado.</div>'}
       </div>
-      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-        <button class="btn sec" id="tipoAdicionar">+ Adicionar documento</button>
-        <button class="btn" id="tipoSalvar">Salvar lista</button>
+      <button class="btn sec mini" id="opAdicionar" style="margin-top:6px">+ Adicionar opcional</button>
+
+      <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+        <button class="btn" id="tipoSalvar">Salvar listas</button>
         <button class="btn sec" id="tipoDesfazer">Desfazer</button>
       </div>
       <div class="prazo" style="margin-top:12px;font-size:12px;color:var(--apagado)">
@@ -1693,35 +2037,47 @@ function ligarAnexar(){
     l.onclick = ()=>abrirDocumentos(l.dataset.docs));
 
   const b = id => document.getElementById(id);
-  if(b('tipoAdicionar')) b('tipoAdicionar').onclick = ()=>{
+  const adicionar = grupo => {
     lerTiposDaTela();
-    S.tiposEdit.push('');
+    S.tiposEdit[grupo].push('');
     desenhar();
-    const campos = document.querySelectorAll('[data-tipo]');
+    const campos = document.querySelectorAll('[data-'+grupo+']');
     if(campos.length) campos[campos.length-1].focus();
   };
+  if(b('obAdicionar')) b('obAdicionar').onclick = ()=>adicionar('ob');
+  if(b('opAdicionar')) b('opAdicionar').onclick = ()=>adicionar('op');
   if(b('tipoDesfazer')) b('tipoDesfazer').onclick = ()=>{
-    S.tiposEdit = null; desenhar(); toast('Lista restaurada.');
+    S.tiposEdit = null; desenhar(); toast('Listas restauradas.');
   };
   if(b('tipoSalvar')) b('tipoSalvar').onclick = salvarTipos;
-  document.querySelectorAll('[data-tipo-remover]').forEach(x=> x.onclick = ()=>{
+  document.querySelectorAll('[data-remover]').forEach(x=> x.onclick = ()=>{
+    const [grupo, i] = x.dataset.remover.split(':');
     lerTiposDaTela();
-    S.tiposEdit.splice(+x.dataset.tipoRemover, 1);
+    S.tiposEdit[grupo].splice(+i, 1);
     desenhar();
   });
 }
 
+function camposDe(grupo){ return [...document.querySelectorAll('[data-'+grupo+']')]; }
+
 function lerTiposDaTela(){
-  const campos = [...document.querySelectorAll('[data-tipo]')];
-  if(campos.length) S.tiposEdit = campos.map(c=>c.value);
+  if(!document.getElementById('listaOb')) return;
+  S.tiposEdit = {
+    ob: camposDe('ob').map(c=>c.value),
+    op: camposDe('op').map(c=>c.value)
+  };
 }
 
 async function salvarTipos(){
-  const campos = [...document.querySelectorAll('[data-tipo]')];
-  const tipos = campos.map(c=>c.value.toUpperCase().trim()).filter(Boolean);
-  if(!tipos.length) return toast('Deixe pelo menos um documento na lista.', true);
+  const limpa = g => camposDe(g).map(c=>c.value.toUpperCase().trim()).filter(Boolean);
+  const tipos = limpa('ob');
+  const opcionais = limpa('op');
+  if(!tipos.length) return toast('Deixe pelo menos um documento obrigatório.', true);
 
-  const renomear = campos
+  const repetido = opcionais.find(t=>tipos.includes(t));
+  if(repetido) return toast('"'+repetido+'" está nas duas listas. Deixe em uma só.', true);
+
+  const renomear = [...camposDe('ob'), ...camposDe('op')]
     .map(c=>({de:c.dataset.original.toUpperCase().trim(), para:c.value.toUpperCase().trim()}))
     .filter(r=> r.de && r.para && r.de!==r.para);
 
@@ -1731,10 +2087,10 @@ async function salvarTipos(){
   }
   carregando(true);
   try{
-    const r = await api('salvarTipos', {tipos, renomear});
+    const r = await api('salvarTipos', {tipos, opcionais, renomear});
     S.tiposEdit = null;
     await recarregar();
-    toast('Lista salva' + (r.renomeados ? ' · '+r.renomeados+' arquivos renomeados' : '') + '.');
+    toast('Listas salvas' + (r.renomeados ? ' · '+r.renomeados+' arquivos renomeados' : '') + '.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
@@ -2092,10 +2448,24 @@ function extrairCartoes(paginas, nomeArquivo){
   return cartoes.filter(c=>c.dias.length);
 }
 
+/* ---------- cálculos cadastrados ---------- */
+const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaDomingo:'06:00',
+  tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA'};
+
+function calculoPor(id){
+  return S.he.calculos.find(c=>c.id===id) || S.he.calculos[0] || CALCULO_PADRAO;
+}
+function calculoAtual(){ return calculoPor(S.he.calculoId); }
+function resumoCalculo(c){
+  return c.jornada+' · dom '+c.jornadaDomingo+' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
+         ' · tol. '+c.tolerancia+' min'+(c.base==='CH'?' · base CH':'');
+}
+
 /* ---------- apuração ---------- */
 function apurar(cartao, cfg){
   const notIni = horaParaMin(cfg.noturnoIni), notFim = horaParaMin(cfg.noturnoFim);
   const jornadaFixa = horaParaMin(cfg.jornada);
+  const jornadaDom = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
   const tol = +cfg.tolerancia;
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
@@ -2125,7 +2495,8 @@ function apurar(cartao, cfg){
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
     const cem = d.ch === 0 || d.definicao.toUpperCase() !== 'DIA NORMAL';
-    const base = cfg.base === 'CH' ? d.ch : jornadaFixa;
+    const domingo = String(d.semana||'').toLowerCase().indexOf('dom') === 0;
+    const base = cfg.base === 'CH' ? d.ch : (domingo ? jornadaDom : jornadaFixa);
     const extra = cem ? trabalhado : Math.max(0, trabalhado - base);
 
     /* os minutos extras são os últimos do dia: é ali que cai o adicional noturno */
@@ -2156,30 +2527,279 @@ function apurar(cartao, cfg){
   return r;
 }
 
+/* ==================================================================
+   CARTÃO PONTO EM FOTO (JPG/PNG)
+   A leitura automática de imagem não é confiável neste relatório —
+   as marcações vêm coladas na letra de origem e o OCR erra quase tudo.
+   Então a foto abre lado a lado com uma grade de digitação: escreve-se
+   só as batidas do dia e o sistema calcula o resto pelas mesmas regras.
+   ================================================================== */
+const SEMANA = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function diasDaCompetencia(comp){
+  const ano = +comp.substring(0,4), mes = +comp.substring(5,7);
+  const ultimo = new Date(ano, mes, 0).getDate();
+  const dias = [];
+  for(let d=1; d<=ultimo; d++){
+    const data = new Date(ano, mes-1, d);
+    dias.push({
+      data: String(d).padStart(2,'0')+'/'+String(mes).padStart(2,'0')+'/'+ano,
+      semana: SEMANA[data.getDay()],
+      domingo: data.getDay()===0
+    });
+  }
+  return dias;
+}
+
+function lerMarcacoes(txt){
+  const achados = String(txt||'').match(/\d{1,2}\s*:\s*\d{2}/g) || [];
+  return achados.map(t=>horaParaMin(t.replace(/\s/g,'')));
+}
+
+/* Grade de digitação/edição das marcações.
+   Serve tanto para foto nova (dias em branco) quanto para corrigir
+   um cartão já apurado, inclusive os lidos de PDF. */
+function gradeCartao(op){
+  const comp = S.competencia;
+  const dias = op.dias;
+  const ops = S.funcionarios.filter(f=>f.status!=='DEMITIDO')
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'))
+    .map(f=>`<option value="${esc(f.id)}" ${f.id===op.funcionarioId?'selected':''}>${esc(f.nome)}${f.filial?' · '+esc(f.filial):''}</option>`).join('');
+  const semCadastro = !op.funcionarioId && op.nome;
+
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>${esc(op.subtitulo)}</small><h2>${esc(op.titulo)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo">
+      ${op.aviso ? `<div class="aviso info">${op.aviso}</div>` : ''}
+
+      ${op.urlImagem ? `
+      <div class="foto-ponto" id="fotoPonto"><img src="${op.urlImagem}" alt="Cartão ponto"></div>` : ''}
+
+      <div style="display:flex;gap:8px;margin:${op.urlImagem?'8px':'0'} 0 18px;flex-wrap:wrap;align-items:flex-end">
+        ${op.urlImagem?'<button class="btn sec mini" id="fotoZoom">Ampliar foto</button>':''}
+        <div style="flex:1;min-width:220px">
+          <label class="campo-lbl" for="mFunc">Funcionário</label>
+          <select class="entrada" id="mFunc">
+            <option value="">— escolher —</option>${ops}
+            <option value="_OUTRO" ${semCadastro?'selected':''}>Não está na lista…</option>
+          </select>
+        </div>
+        <div id="boxNome" style="display:${semCadastro?'block':'none'};flex:1;min-width:200px">
+          <label class="campo-lbl" for="mNome">Nome completo</label>
+          <input class="entrada" id="mNome" value="${esc(semCadastro?op.nome:'')}"
+                 placeholder="Nome como está no cartão">
+        </div>
+        <div style="flex:2;min-width:240px">
+          <label class="campo-lbl" for="mObs">Observações</label>
+          <input class="entrada" id="mObs" value="${esc(op.observacoes||'')}"
+                 placeholder="Anotação sobre este cartão">
+        </div>
+      </div>
+
+      <div class="resumo-imp" id="mResumo"></div>
+
+      <div class="previa" style="max-height:420px">
+        <table><thead><tr>
+          <th style="width:96px">Data</th><th style="width:44px">Dia</th>
+          <th>Marcações do dia</th><th style="width:86px">Carga</th>
+          <th style="width:64px">100%</th><th style="width:150px">Cálculo</th>
+        </tr></thead><tbody>
+        ${dias.map((d,i)=>`<tr>
+          <td class="mono">${esc(d.data)}</td>
+          <td style="color:${d.domingo?'var(--vermelho)':'inherit'}">${esc(d.semana)}</td>
+          <td><input class="entrada m-batida" data-i="${i}" placeholder="09:04 13:40 14:31 20:02"
+                     value="${esc((d.marcas||[]).map(minParaHora).join(' '))}"
+                     style="width:100%;font-family:'JetBrains Mono',monospace"></td>
+          <td><input class="entrada m-ch" data-i="${i}"
+                     value="${esc(minParaHora(d.ch != null ? d.ch : horaParaMin(d.domingo ? calculoAtual().jornadaDomingo : calculoAtual().jornada)))}"
+                     style="width:78px;font-family:'JetBrains Mono',monospace"></td>
+          <td style="text-align:center"><input type="checkbox" class="m-cem" data-i="${i}"
+                     ${d.cem?'checked':''} title="Feriado ou folga trabalhada: tudo a 100%"></td>
+          <td class="mono" id="mCalc${i}" style="color:var(--apagado)">—</td>
+        </tr>`).join('')}
+        </tbody></table>
+      </div>
+    </div>
+    <div class="modal-pe">
+      ${op.arquivo ? `<label style="margin-right:auto;display:flex;align-items:center;gap:7px;font-size:13px">
+        <input type="checkbox" id="mAnexar" checked>
+        Anexar esta foto como CARTÃO PONTO de ${compBonita(comp)}
+      </label>` : '<span style="margin-right:auto"></span>'}
+      <button class="btn sec" id="mCancelar">Cancelar</button>
+      <button class="btn" id="mConcluir">${esc(op.rotuloBotao || 'Apurar')}</button>
+    </div>`, true);
+
+  const q = x => el.querySelector(x);
+
+  if(op.urlImagem) q('#fotoZoom').onclick = ()=>{
+    const box = q('#fotoPonto');
+    box.classList.toggle('cheia');
+    q('#fotoZoom').textContent = box.classList.contains('cheia') ? 'Reduzir foto' : 'Ampliar foto';
+  };
+  const ajustarNome = ()=>{
+    q('#boxNome').style.display = q('#mFunc').value==='_OUTRO' ? 'block' : 'none';
+    if(q('#mAnexar')) q('#mAnexar').disabled = !q('#mFunc').value || q('#mFunc').value==='_OUTRO';
+  };
+  q('#mFunc').onchange = ajustarNome;
+  ajustarNome();
+  q('#mCancelar').onclick = ()=>{ if(op.urlImagem) URL.revokeObjectURL(op.urlImagem); el.remove(); };
+
+  const montar = ()=>{
+    const cfg = calculoPor(op.calculoId);
+    return dias.map((d,i)=>{
+      const marcas = lerMarcacoes(el.querySelector(`.m-batida[data-i="${i}"]`).value);
+      const chTxt = el.querySelector(`.m-ch[data-i="${i}"]`).value.trim();
+      const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
+      const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada) : cfg.jornada;
+      const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
+      return {data:d.data, semana:d.semana, definicao: cem?'Feriado':'Dia Normal',
+              marcas, ch, relDiurno:0, relNoturno:0, relSaldo:0};
+    });
+  };
+
+  const atualizar = ()=>{
+    const r = apurar({nome:'', dias: montar()}, calculoPor(op.calculoId));
+    r.detalhe.forEach((d,i)=>{
+      const cel = q('#mCalc'+i);
+      if(!cel) return;
+      if(!d.marcas.length){ cel.textContent='—'; cel.style.color='var(--apagado)'; return; }
+      const partes = [minParaHora(d.trabalhado)];
+      if(d.extra) partes.push('+'+minParaHora(d.extra));
+      if(d.atraso) partes.push('-'+minParaHora(d.atraso));
+      cel.textContent = partes.join('  ');
+      cel.style.color = d.atraso ? 'var(--vermelho)' : d.extra ? 'var(--verde)' : 'var(--tinta)';
+    });
+    q('#mResumo').innerHTML = `
+      <div><b>${minParaHora(r.trabalhado)}</b> trabalhadas</div>
+      <div><b style="color:var(--verde)">${minParaHora(r.he50)}</b> extras 50%</div>
+      <div><b style="color:var(--verde)">${minParaHora(r.he100)}</b> extras 100%</div>
+      <div><b>${minParaHora(r.noturno)}</b> adicional noturno</div>
+      <div><b style="color:var(--vermelho)">${minParaHora(r.atrasos)}</b> atrasos</div>
+      <div><b>${r.diasFalta}</b> dias sem marcação</div>`;
+  };
+
+  el.querySelectorAll('.m-batida, .m-ch, .m-cem').forEach(c=>{ c.oninput = atualizar; c.onchange = atualizar; });
+  el.querySelectorAll('.m-batida').forEach((c,i,todos)=>{
+    c.onkeydown = ev=>{ if(ev.key==='Enter' && todos[i+1]){ ev.preventDefault(); todos[i+1].focus(); } };
+  });
+  atualizar();
+  const primeiro = el.querySelector('.m-batida');
+  if(primeiro) primeiro.focus();
+
+  q('#mConcluir').onclick = async ()=>{
+    const sel = q('#mFunc').value;
+    const f = sel && sel!=='_OUTRO' ? S.funcionarios.find(x=>x.id===sel) : null;
+    const nome = f ? f.nome : q('#mNome').value.toUpperCase().trim();
+    if(!nome) return toast('Escolha o funcionário ou escreva o nome completo.', true);
+
+    const novosDias = montar();
+    if(!novosDias.some(d=>d.marcas.length)) return toast('Digite as marcações de pelo menos um dia.', true);
+
+    const cartao = {
+      nome, arquivo: op.nomeArquivo, cargo: f ? f.cargo : (op.cargo||''),
+      periodoIni: novosDias[0].data, periodoFim: novosDias[novosDias.length-1].data, dias: novosDias
+    };
+    const item = {
+      nome, cartao, arquivo: op.nomeArquivo,
+      funcionarioId: f ? f.id : '', filial: f ? f.filial : '', cargo: f ? f.cargo : (op.cargo||''),
+      periodoIni: cartao.periodoIni, periodoFim: cartao.periodoFim,
+      calculoId: op.calculoId, observacoes: q('#mObs').value.trim(),
+      ap: apurar(cartao, calculoPor(op.calculoId))
+    };
+    guardarResultado(item, op.indice);
+
+    if(op.arquivo && f && q('#mAnexar') && q('#mAnexar').checked && !q('#mAnexar').disabled){
+      carregando(true);
+      try{
+        const pronto = await prepararArquivo(op.arquivo);
+        await api('enviarDocumento', {
+          funcionarioId: f.id, tipo:'CARTAO PONTO', competencia: comp,
+          mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
+        });
+        await recarregar();
+      }catch(e){ toast('Apurado, mas a foto não foi anexada: '+e.message, true); }
+      finally{ carregando(false); }
+    }
+    if(op.urlImagem) URL.revokeObjectURL(op.urlImagem);
+    el.remove();
+    desenhar();
+    toast('Apuração de '+nome+' concluída.');
+  };
+  return el;
+}
+
+function guardarResultado(item, indice){
+  if(indice != null && S.he.resultados[indice]) S.he.resultados[indice] = item;
+  else {
+    const antes = S.he.resultados.findIndex(r=>normalizar(r.nome)===normalizar(item.nome));
+    if(antes>=0) S.he.resultados[antes] = item; else S.he.resultados.push(item);
+  }
+  S.he.resultados.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+}
+
+/* foto nova: mês em branco para digitar */
+function digitarCartao(arquivo){
+  const dias = diasDaCompetencia(S.competencia).map(d=>({
+    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null, cem:false
+  }));
+  return gradeCartao({
+    titulo:'Digitar marcações',
+    subtitulo:'Cartão ponto em foto · '+compBonita(S.competencia),
+    aviso:'Não dá para ler foto de cartão ponto de forma confiável, então as batidas são '+
+          'digitadas. Escreva só os horários do dia, separados por espaço — o cálculo de '+
+          'extras, noturno e atrasos é o mesmo do PDF.',
+    dias, urlImagem: URL.createObjectURL(arquivo), arquivo,
+    nomeArquivo: arquivo.name, calculoId: S.he.calculoId
+  });
+}
+
+/* corrigir um cartão já apurado */
+function editarResultado(i){
+  const r = S.he.resultados[i];
+  const dias = r.cartao.dias.map(d=>({
+    data: d.data, semana: d.semana,
+    domingo: String(d.semana||'').toLowerCase().indexOf('dom')===0,
+    marcas: (d.marcas||[]).slice(), ch: d.ch,
+    cem: d.ch === 0 || String(d.definicao||'').toUpperCase() !== 'DIA NORMAL'
+  }));
+  return gradeCartao({
+    titulo: r.nome,
+    subtitulo:'Corrigir marcações · '+esc(r.arquivo||'digitado'),
+    aviso:'Ajuste as batidas, a carga do dia ou marque um feriado. Os totais mudam na hora.',
+    dias, nomeArquivo: r.arquivo, cargo: r.cargo,
+    funcionarioId: r.funcionarioId, nome: r.nome,
+    observacoes: r.observacoes, calculoId: r.calculoId,
+    indice: i, rotuloBotao:'Salvar correções'
+  });
+}
+
+
 /* ---------- tela ---------- */
 function telaHorasExtras(){
-  const c = S.he.cfg;
+  const c = calculoAtual();
   return `
   <div class="barra">
-    <div><label class="campo-lbl" for="heJornada">Jornada diária</label>
-      <input class="entrada" id="heJornada" value="${esc(c.jornada)}" style="width:92px"></div>
-    <div><label class="campo-lbl" for="heTol">Tolerância de atraso</label>
-      <input class="entrada" type="number" min="0" max="60" id="heTol" value="${esc(c.tolerancia)}" style="width:92px"></div>
-    <div><label class="campo-lbl" for="heNot">Noturno das</label>
-      <input class="entrada" id="heNot" value="${esc(c.noturnoIni)}" style="width:84px"></div>
-    <div><label class="campo-lbl" for="heNotF">até</label>
-      <input class="entrada" id="heNotF" value="${esc(c.noturnoFim)}" style="width:84px"></div>
-    <div style="flex:1;min-width:210px"><label class="campo-lbl" for="heBase">Base do cálculo</label>
-      <select class="entrada" id="heBase">
-        <option value="FIXA" ${c.base==='FIXA'?'selected':''}>Jornada fixa acima</option>
-        <option value="CH" ${c.base==='CH'?'selected':''}>Carga horária de cada dia (CH do cartão)</option>
-      </select></div>
+    <div style="flex:1;min-width:230px">
+      <label class="campo-lbl" for="heCalculo">Cálculo aplicado ao que for importado</label>
+      <select class="entrada" id="heCalculo">
+        ${S.he.calculos.map(x=>`<option value="${esc(x.id)}" ${x.id===S.he.calculoId?'selected':''}>${esc(x.nome)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="flex:2;min-width:240px">
+      <label class="campo-lbl">Regras deste cálculo</label>
+      <div class="mono" style="font-size:12px;color:var(--apagado);padding:10px 0">${esc(resumoCalculo(c))}</div>
+    </div>
+    ${podeAprovar()?'<button class="btn sec" id="heCalculos" style="align-self:flex-end">Gerenciar cálculos</button>':''}
     <button class="btn sec" id="heSalvas" style="align-self:flex-end">Apurações salvas</button>
   </div>
 
   <div class="solta" id="heSolta" style="margin-bottom:18px">
-    <b>Importar cartões ponto em PDF</b>
-    <small>Clique ou arraste. Pode enviar vários arquivos de uma vez.</small>
+    <b>Importar cartões ponto</b>
+    <small>Serão apurados pelo cálculo <b>${esc(c.nome)}</b> — dá para trocar depois, cartão a cartão.<br>
+    PDF é lido automaticamente. Foto (JPG ou PNG) abre a grade de digitação.</small>
   </div>
 
   ${S.he.resultados.length ? tabelaHoras() : vazio('Nenhum cartão importado',
@@ -2211,20 +2831,29 @@ function tabelaHoras(){
     </div>
     <div class="previa" style="max-height:none;border:none;border-radius:0">
       <table><thead><tr>
-        <th>Funcionário</th><th>Filial</th><th>Período</th><th>Trabalhadas</th>
+        <th>Funcionário</th><th>Filial</th><th>Cálculo</th><th>Trabalhadas</th>
         <th>HE 50%</th><th>HE 100%</th><th>Ad. noturno</th><th>Atrasos</th><th>Faltas</th>
+        <th style="min-width:190px">Observações</th><th></th>
       </tr></thead><tbody>
       ${rs.map((r,i)=>`<tr style="cursor:pointer" data-he="${i}">
         <td><b>${esc(r.nome)}</b>${r.funcionarioId?'':
           ` <button class="tag dup" data-cadastrar="${i}" title="Cadastrar este funcionário">Não cadastrado</button>`}</td>
         <td>${esc(r.filial||'—')}</td>
-        <td class="mono">${esc(r.periodoIni)} a ${esc(r.periodoFim)}</td>
+        <td><select class="entrada mini-sel" data-calc="${i}" title="Cálculo usado neste cartão">
+          ${S.he.calculos.map(x=>`<option value="${esc(x.id)}" ${x.id===r.calculoId?'selected':''}>${esc(x.nome)}</option>`).join('')}
+        </select></td>
         <td class="mono">${minParaHora(r.ap.trabalhado)}</td>
         <td class="mono" style="color:var(--verde);font-weight:700">${minParaHora(r.ap.he50)}</td>
         <td class="mono" style="color:var(--verde);font-weight:700">${minParaHora(r.ap.he100)}</td>
         <td class="mono">${minParaHora(r.ap.noturno)}</td>
         <td class="mono" style="color:${r.ap.atrasos?'var(--vermelho)':'inherit'}">${minParaHora(r.ap.atrasos)}</td>
         <td class="mono">${r.ap.diasFalta}</td>
+        <td><input class="entrada obs-he" data-obs="${i}" value="${esc(r.observacoes||'')}"
+                   placeholder="Anotação"></td>
+        <td style="white-space:nowrap;text-align:right">
+          <button class="link-acao" data-editar-he="${i}">Editar</button>
+          <button class="link-acao rem" data-excluir-he="${i}">Excluir</button>
+        </td>
       </tr>`).join('')}
       </tbody></table>
     </div>
@@ -2232,18 +2861,22 @@ function tabelaHoras(){
 }
 
 function ligarHorasExtras(){
-  const cfg = S.he.cfg;
-  const liga = (id, campo)=>{
-    const e = document.getElementById(id);
-    if(e) e.onchange = ()=>{ cfg[campo] = e.value; recalcular(); };
-  };
-  liga('heJornada','jornada'); liga('heTol','tolerancia');
-  liga('heNot','noturnoIni'); liga('heNotF','noturnoFim'); liga('heBase','base');
+  const sel = document.getElementById('heCalculo');
+  if(sel) sel.onchange = ()=>{ S.he.calculoId = sel.value; desenhar(); };
+
+  document.querySelectorAll('[data-calc]').forEach(x=> x.onchange = ev=>{
+    ev.stopPropagation();
+    const r = S.he.resultados[+x.dataset.calc];
+    r.calculoId = x.value;
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId));
+    desenhar();
+  });
+  document.querySelectorAll('[data-calc]').forEach(x=> x.onclick = ev=>ev.stopPropagation());
 
   const area = document.getElementById('heSolta');
   if(area){
     const inp = document.createElement('input');
-    inp.type='file'; inp.accept='.pdf'; inp.multiple = true;
+    inp.type='file'; inp.accept='.pdf,.jpg,.jpeg,.png'; inp.multiple = true;
     inp.onchange = ()=> importarCartoes([...inp.files]);
     area.onclick = ()=>inp.click();
     area.ondragover = e=>{ e.preventDefault(); area.classList.add('sobre'); };
@@ -2256,17 +2889,37 @@ function ligarHorasExtras(){
   if(b('hePdf')) b('hePdf').onclick = exportarHorasPdf;
   if(b('heSalvar')) b('heSalvar').onclick = salvarApuracao;
   if(b('heSalvas')) b('heSalvas').onclick = verApuracoesSalvas;
+  if(b('heCalculos')) b('heCalculos').onclick = gerenciarCalculos;
   document.querySelectorAll('[data-he]').forEach(tr=>
     tr.onclick = ()=>detalheHoras(+tr.dataset.he));
+  document.querySelectorAll('[data-editar-he]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation(); editarResultado(+b.dataset.editarHe);
+  });
+  document.querySelectorAll('[data-excluir-he]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation();
+    const i = +b.dataset.excluirHe, r = S.he.resultados[i];
+    if(!confirm('Tirar '+r.nome+' desta apuração?\n\nIsso não apaga nada que já tenha sido salvo na planilha.')) return;
+    S.he.resultados.splice(i, 1);
+    desenhar();
+    toast('Cartão removido da apuração.');
+  });
+  document.querySelectorAll('[data-obs]').forEach(c=>{
+    c.onclick = e=>e.stopPropagation();
+    c.oninput = ()=>{ S.he.resultados[+c.dataset.obs].observacoes = c.value; };
+  });
   document.querySelectorAll('[data-cadastrar]').forEach(b=> b.onclick = e=>{
     e.stopPropagation();
     cadastrarDoCartao(+b.dataset.cadastrar);
   });
 }
 
-async function importarCartoes(arquivos){
-  arquivos = arquivos.filter(a=>/\.pdf$/i.test(a.name));
-  if(!arquivos.length) return toast('Selecione arquivos PDF do espelho de ponto.', true);
+async function importarCartoes(todos){
+  const imagens = todos.filter(a=>/\.(jpe?g|png)$/i.test(a.name));
+  const arquivos = todos.filter(a=>/\.pdf$/i.test(a.name));
+  if(!arquivos.length && !imagens.length){
+    return toast('Envie o espelho de ponto em PDF, JPG ou PNG.', true);
+  }
+  if(!arquivos.length) return filaDeFotos(imagens);
   carregando(true);
   const erros = [];
   try{
@@ -2282,7 +2935,7 @@ async function importarCartoes(arquivos){
             nome: cart.nome, cartao: cart, arquivo: arq.name,
             funcionarioId: f?f.id:'', filial: f?f.filial:'', cargo: (f&&f.cargo)||cart.cargo,
             periodoIni: cart.periodoIni, periodoFim: cart.periodoFim,
-            ap: apurar(cart, S.he.cfg)
+            calculoId: S.he.calculoId, ap: apurar(cart, calculoPor(S.he.calculoId))
           };
           if(anterior>=0) S.he.resultados[anterior] = item;
           else S.he.resultados.push(item);
@@ -2294,10 +2947,27 @@ async function importarCartoes(arquivos){
     toast(S.he.resultados.length+' cartão(ões) apurado(s).');
     if(erros.length){ console.warn(erros); toast(erros[0], true); }
   }finally{ carregando(false); }
+  if(imagens.length) filaDeFotos(imagens);
+}
+
+/* as fotos são digitadas uma de cada vez */
+function filaDeFotos(imagens){
+  const proxima = ()=>{
+    const arq = imagens.shift();
+    if(!arq) return;
+    const el = digitarCartao(arq);
+    if(imagens.length){
+      const obs = new MutationObserver(()=>{
+        if(!document.body.contains(el)){ obs.disconnect(); proxima(); }
+      });
+      obs.observe(document.getElementById('modais'), {childList:true});
+    }
+  };
+  proxima();
 }
 
 function recalcular(){
-  S.he.resultados.forEach(r=> r.ap = apurar(r.cartao, S.he.cfg));
+  S.he.resultados.forEach(r=> r.ap = apurar(r.cartao, calculoPor(r.calculoId)));
   desenhar();
 }
 
@@ -2305,7 +2975,7 @@ function detalheHoras(i){
   const r = S.he.resultados[i];
   const el = modal(`
     <div class="modal-topo">
-      <div><small>${esc(r.periodoIni)} a ${esc(r.periodoFim)} · ${esc(r.arquivo)}</small><h2>${esc(r.nome)}</h2></div>
+      <div><small>${esc(r.periodoIni)} a ${esc(r.periodoFim)} · ${esc(r.arquivo)} · cálculo ${esc(calculoPor(r.calculoId).nome)}</small><h2>${esc(r.nome)}</h2></div>
       <button class="fechar" aria-label="Fechar">✕</button>
     </div>
     <div class="modal-corpo">
@@ -2364,14 +3034,18 @@ function cadastrarDoCartao(i){
 
 /* ---------- exportações ---------- */
 function linhasResumo(){
-  return [['FUNCIONÁRIO','FILIAL','CARGO','PERÍODO','DIAS TRABALHADOS','DIAS SEM MARCAÇÃO',
+  return [['FUNCIONÁRIO','FILIAL','CARGO','PERÍODO','CÁLCULO','JORNADA','JORNADA DOMINGO',
+           'DIAS TRABALHADOS','DIAS SEM MARCAÇÃO',
            'HORAS TRABALHADAS','HE 50%','HE 100%','HE NOTURNAS','ADICIONAL NOTURNO',
-           'ATRASOS','DIAS COM ATRASO']]
+           'ATRASOS','DIAS COM ATRASO','OBSERVAÇÕES']]
     .concat(S.he.resultados.map(r=>[
       r.nome, r.filial||'', r.cargo||'', r.periodoIni+' a '+r.periodoFim,
+      calculoPor(r.calculoId).nome, calculoPor(r.calculoId).jornada,
+      calculoPor(r.calculoId).jornadaDomingo,
       r.ap.diasTrabalhados, r.ap.diasFalta, minParaHora(r.ap.trabalhado),
       minParaHora(r.ap.he50), minParaHora(r.ap.he100), minParaHora(r.ap.heNoturnas),
-      minParaHora(r.ap.noturno), minParaHora(r.ap.atrasos), r.ap.diasAtraso
+      minParaHora(r.ap.noturno), minParaHora(r.ap.atrasos), r.ap.diasAtraso,
+      r.observacoes || ''
     ]));
 }
 
@@ -2379,7 +3053,8 @@ async function exportarHorasExcel(){
   await usar('xlsx');
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(linhasResumo());
-  ws['!cols'] = [{wch:36},{wch:16},{wch:18},{wch:24}].concat(Array(9).fill({wch:16}));
+  ws['!cols'] = [{wch:36},{wch:16},{wch:18},{wch:24},{wch:16}]
+    .concat(Array(11).fill({wch:15})).concat([{wch:40}]);
   XLSX.utils.book_append_sheet(wb, ws, 'RESUMO');
 
   const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH','EXTRA','EXTRA NOTURNA','ATRASO']];
@@ -2406,10 +3081,10 @@ async function exportarHorasPdf(){
     const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
     const L=841.89, A=595.28, m=34;          /* paisagem */
     const cols = [
-      {t:'FUNCIONÁRIO', x:m, w:210},{t:'FILIAL', x:m+215, w:80},
-      {t:'TRABALHADAS', x:m+300, w:70},{t:'HE 50%', x:m+375, w:60},
-      {t:'HE 100%', x:m+440, w:60},{t:'AD. NOT.', x:m+505, w:60},
-      {t:'ATRASOS', x:m+570, w:60},{t:'FALTAS', x:m+635, w:50}
+      {t:'FUNCIONÁRIO', x:m, w:190},{t:'FILIAL', x:m+195, w:70},{t:'CÁLCULO', x:m+250, w:48},
+      {t:'TRABALHADAS', x:m+320, w:70},{t:'HE 50%', x:m+395, w:60},
+      {t:'HE 100%', x:m+460, w:60},{t:'AD. NOT.', x:m+525, w:60},
+      {t:'ATRASOS', x:m+590, w:60},{t:'FALTAS', x:m+655, w:50}
     ];
     let pg, y;
     const cabecalho = ()=>{
@@ -2417,8 +3092,11 @@ async function exportarHorasPdf(){
       const h=15; pg.drawImage(logo,{x:m, y:y, width:logo.width*h/logo.height, height:h});
       pg.drawText('Relatório de horas extras · '+compBonita(S.competencia),
         {x:m, y:y-24, size:13, font:fonteB, color:rgb(.06,.07,.08)});
-      pg.drawText('Jornada '+S.he.cfg.jornada+' · noturno das '+S.he.cfg.noturnoIni+' às '+
-        S.he.cfg.noturnoFim+' · tolerância de atraso '+S.he.cfg.tolerancia+' min',
+      const usados = [...new Set(S.he.resultados.map(r=>calculoPor(r.calculoId).nome))];
+      pg.drawText('Cálculo: '+usados.map(n=>{
+          const c = S.he.calculos.find(x=>x.nome===n) || CALCULO_PADRAO;
+          return n+' ('+c.jornada+' / dom '+c.jornadaDomingo+')';
+        }).join('  ·  '),
         {x:m, y:y-38, size:8, font:fonte, color:rgb(.42,.45,.5)});
       y -= 58;
       cols.forEach(c=>pg.drawText(c.t,{x:c.x, y, size:7, font:fonteB, color:rgb(.42,.45,.5)}));
@@ -2430,11 +3108,17 @@ async function exportarHorasPdf(){
     cabecalho();
     S.he.resultados.forEach(r=>{
       if(y < m+30) cabecalho();
-      const v = [corta(r.nome,40), corta(r.filial,14), minParaHora(r.ap.trabalhado),
+      const v = [corta(r.nome,36), corta(r.filial,12), corta(calculoPor(r.calculoId).nome,9),
+                 minParaHora(r.ap.trabalhado),
                  minParaHora(r.ap.he50), minParaHora(r.ap.he100), minParaHora(r.ap.noturno),
                  minParaHora(r.ap.atrasos), String(r.ap.diasFalta)];
       cols.forEach((c,i)=>pg.drawText(v[i],{x:c.x, y, size:8.5,
-        font: i>=3&&i<=4?fonteB:fonte, color:rgb(.06,.07,.08)}));
+        font: i>=4&&i<=5?fonteB:fonte, color:rgb(.06,.07,.08)}));
+      if(r.observacoes){
+        y -= 10;
+        pg.drawText(corta(r.observacoes, 120), {x:cols[0].x, y, size:7.5, font:fonte,
+          color:rgb(.42,.45,.5)});
+      }
       y -= 8;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
       y -= 12;
@@ -2443,7 +3127,7 @@ async function exportarHorasPdf(){
     if(y < m+30) cabecalho();
     y -= 4;
     pg.drawText('TOTAL',{x:cols[0].x, y, size:9, font:fonteB});
-    [null,minParaHora(s('trabalhado')),minParaHora(s('he50')),minParaHora(s('he100')),
+    [null,null,minParaHora(s('trabalhado')),minParaHora(s('he50')),minParaHora(s('he100')),
      minParaHora(s('noturno')),minParaHora(s('atrasos'))].forEach((t,i)=>{
       if(t) pg.drawText(t,{x:cols[i+1].x, y, size:9, font:fonteB});
     });
@@ -2461,17 +3145,112 @@ async function salvarApuracao(){
     const itens = S.he.resultados.map(r=>({
       funcionarioId:r.funcionarioId, nome:r.nome, filial:r.filial, cargo:r.cargo,
       periodoIni:r.periodoIni, periodoFim:r.periodoFim,
-      jornada:S.he.cfg.jornada, base:S.he.cfg.base,
+      calculo:calculoPor(r.calculoId).nome, jornada:calculoPor(r.calculoId).jornada,
+      base:calculoPor(r.calculoId).base,
       diasTrabalhados:r.ap.diasTrabalhados, diasFalta:r.ap.diasFalta, diasAtraso:r.ap.diasAtraso,
       totalTrabalhado:minParaHora(r.ap.trabalhado), he50:minParaHora(r.ap.he50),
       he100:minParaHora(r.ap.he100), heNoturnas:minParaHora(r.ap.heNoturnas),
       adicionalNoturno:minParaHora(r.ap.noturno), atrasos:minParaHora(r.ap.atrasos),
-      arquivo:r.arquivo
+      observacoes:r.observacoes || '', arquivo:r.arquivo
     }));
     const r = await api('salvarApuracao', {competencia:S.competencia, itens});
     toast(r.salvos+' apurações salvas na competência '+compBonita(S.competencia)+'.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
+}
+
+function gerenciarCalculos(){
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Horas extras</small><h2>Cálculos</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo" id="calcCorpo"></div>`, true);
+  desenharCalculos(el);
+}
+
+function linhaCalculo(c, novo){
+  return `<tr data-calc-id="${esc(c.id||'')}" ${novo?'data-novo="1"':''}>
+    <td><input class="entrada" data-c="nome" value="${esc(c.nome||'')}"
+               placeholder="${novo?'Ex.: CALCULO 02':''}" style="min-width:130px"></td>
+    <td><input class="entrada mono" data-c="jornada" value="${esc(c.jornada||'07:20')}" style="width:76px"></td>
+    <td><input class="entrada mono" data-c="jornadaDomingo" value="${esc(c.jornadaDomingo||'06:00')}" style="width:76px"></td>
+    <td><input class="entrada mono" data-c="noturnoIni" value="${esc(c.noturnoIni||'22:00')}" style="width:72px"></td>
+    <td><input class="entrada mono" data-c="noturnoFim" value="${esc(c.noturnoFim||'05:00')}" style="width:72px"></td>
+    <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolerancia"
+               value="${esc(c.tolerancia||'10')}" style="width:64px"></td>
+    <td><select class="entrada" data-c="base">
+      <option value="FIXA" ${c.base!=='CH'?'selected':''}>Jornadas fixas</option>
+      <option value="CH" ${c.base==='CH'?'selected':''}>CH do cartão</option>
+    </select></td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="link-acao" data-c-salvar="1">${novo?'Criar':'Salvar'}</button>
+      ${novo?'':'<button class="link-acao rem" data-c-excluir="1">Excluir</button>'}
+    </td></tr>`;
+}
+
+function desenharCalculos(el){
+  const usados = {};
+  S.he.resultados.forEach(r=>{ usados[r.calculoId] = (usados[r.calculoId]||0)+1; });
+
+  el.querySelector('#calcCorpo').innerHTML = `
+    <div class="aviso info">
+      Cada cartão ponto pode ter a sua jornada. Cadastre aqui os cálculos e escolha
+      qual usar na hora de importar — ou troque depois, cartão a cartão, na coluna
+      <b>Cálculo</b> da tabela.
+    </div>
+    <div class="previa" style="max-height:none">
+      <table><thead><tr>
+        <th>Nome</th><th>Seg a sáb</th><th>Domingo</th><th>Noturno de</th><th>até</th>
+        <th>Tolerância</th><th>Base</th><th></th>
+      </tr></thead><tbody>
+      ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
+      ${linhaCalculo({}, true)}
+      </tbody></table>
+    </div>
+    <div class="prazo" style="margin-top:12px;font-size:12px;color:var(--apagado)">
+      A tolerância é em minutos por dia. <b>Base</b> escolhe a régua das horas extras:
+      as jornadas cadastradas aqui, ou a carga horária que vem impressa em cada linha do cartão.
+      ${Object.keys(usados).length>1?'<br>Nesta apuração há cartões usando cálculos diferentes.':''}
+    </div>`;
+
+  el.querySelectorAll('[data-c-salvar]').forEach(b=> b.onclick = async ()=>{
+    const tr = b.closest('tr');
+    const v = campo => tr.querySelector(`[data-c="${campo}"]`).value;
+    const calculo = {
+      id: tr.dataset.novo ? '' : tr.dataset.calcId,
+      nome: v('nome'), jornada: v('jornada'), jornadaDomingo: v('jornadaDomingo'),
+      noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
+      tolerancia: v('tolerancia'), base: v('base')
+    };
+    if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
+    carregando(true);
+    try{
+      const r = await api('salvarCalculo', {calculo});
+      if(tr.dataset.novo) S.he.calculoId = r.id;
+      await recarregar();
+      recalcular();
+      desenharCalculos(el);
+      toast('Cálculo salvo.');
+    }catch(e){ toast(e.message,true); }
+    finally{ carregando(false); }
+  });
+
+  el.querySelectorAll('[data-c-excluir]').forEach(b=> b.onclick = async ()=>{
+    const tr = b.closest('tr');
+    const id = tr.dataset.calcId;
+    if(usados[id]) return toast('Este cálculo está em uso nesta apuração. Troque os cartões antes.', true);
+    if(!confirm('Excluir o cálculo '+tr.querySelector('[data-c="nome"]').value+'?')) return;
+    carregando(true);
+    try{
+      await api('excluirCalculo', {id});
+      await recarregar();
+      recalcular();
+      desenharCalculos(el);
+      toast('Cálculo excluído.');
+    }catch(e){ toast(e.message,true); }
+    finally{ carregando(false); }
+  });
 }
 
 async function verApuracoesSalvas(){
@@ -2487,12 +3266,14 @@ async function verApuracoesSalvas(){
     </div>
     <div class="modal-corpo">
       ${lista.length ? `<div class="previa"><table><thead><tr>
-        <th>Funcionário</th><th>Filial</th><th>HE 50%</th><th>HE 100%</th>
-        <th>Ad. noturno</th><th>Atrasos</th><th>Gerado por</th></tr></thead><tbody>
+        <th>Funcionário</th><th>Filial</th><th>Cálculo</th><th>HE 50%</th><th>HE 100%</th>
+        <th>Ad. noturno</th><th>Atrasos</th><th>Observações</th><th>Gerado por</th></tr></thead><tbody>
         ${lista.map(a=>`<tr>
           <td><b>${esc(a.nome)}</b></td><td>${esc(a.filial)}</td>
+          <td>${esc(a.calculo||'—')}</td>
           <td class="mono">${esc(a.he50)}</td><td class="mono">${esc(a.he100)}</td>
           <td class="mono">${esc(a.adicionalNoturno)}</td><td class="mono">${esc(a.atrasos)}</td>
+          <td style="max-width:220px">${esc(a.observacoes||'')}</td>
           <td style="color:var(--apagado)">${esc(a.geradoPor)}<br><small>${esc(a.geradoEm)}</small></td>
         </tr>`).join('')}</tbody></table></div>`
       : '<div class="vazio"><b>Nada salvo nesta competência</b>Importe os cartões ponto e clique em Salvar apuração.</div>'}
