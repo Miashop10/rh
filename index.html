@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.08.31';
+  const VERSAO_APP = '2026.08.31c';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -992,7 +992,8 @@ function modal(html, larga){
    ================================================================== */
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
-    : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataDemissao:'',status:'EMPREGADO',observacoes:''},
+    : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataDemissao:'',status:'EMPREGADO',
+                     observacoes:'',cpf:'',banco:'',agencia:'',conta:''},
                     (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
@@ -1020,6 +1021,19 @@ function abrirFuncionario(id, extra){
         <div id="boxDem" style="display:${f.status==='DEMITIDO'?'block':'none'}">
           <label class="campo-lbl" for="fDem">Data de demissão</label>
           <input class="entrada" type="date" id="fDem" value="${esc(f.dataDemissao)}"></div>
+      </div>
+
+      <div class="titulo-grupo">Dados bancários e documento</div>
+      <div class="grade">
+        <div><label class="campo-lbl" for="fCpf">CPF</label>
+          <input class="entrada mono" id="fCpf" value="${esc(f.cpf||'')}" placeholder="000.000.000-00"></div>
+        <div><label class="campo-lbl" for="fBanco">Banco</label>
+          <input class="entrada" id="fBanco" value="${esc(f.banco||'')}" placeholder="Nome ou número do banco"></div>
+        <div><label class="campo-lbl" for="fAgencia">Agência</label>
+          <input class="entrada mono" id="fAgencia" value="${esc(f.agencia||'')}"></div>
+        <div><label class="campo-lbl" for="fConta">Conta</label>
+          <input class="entrada mono" id="fConta" value="${esc(f.conta||'')}" placeholder="Com dígito"></div>
+        <div class="full" id="boxCnpj"></div>
         <div class="full"><label class="campo-lbl" for="fObs">Observações</label>
           <textarea class="entrada" id="fObs" placeholder="Anotações internas do RH">${esc(f.observacoes)}</textarea></div>
       </div>
@@ -1032,6 +1046,15 @@ function abrirFuncionario(id, extra){
 
   const st = el.querySelector('#fStatus');
   st.onchange = ()=> el.querySelector('#boxDem').style.display = st.value==='DEMITIDO'?'block':'none';
+
+  const mostrarCnpj = ()=>{
+    const fil = S.filiais.find(x=>x.nome===el.querySelector('#fFilial').value);
+    el.querySelector('#boxCnpj').innerHTML = fil ? `
+      <label class="campo-lbl">CNPJ da filial ${esc(fil.nome)}</label>
+      <div class="mono" style="padding:9px 0;color:var(--apagado)">${esc(fil.cnpj || 'não cadastrado — informe na engrenagem → Filiais')}</div>` : '';
+  };
+  el.querySelector('#fFilial').addEventListener('change', mostrarCnpj);
+  mostrarCnpj();
   el.querySelector('#fCancelar').onclick = ()=>el.remove();
 
   el.querySelector('#fSalvar').onclick = async ()=>{
@@ -1041,6 +1064,10 @@ function abrirFuncionario(id, extra){
       filial: el.querySelector('#fFilial').value,
       cargo: el.querySelector('#fCargo').value.trim(),
       dataAdmissao: el.querySelector('#fAdm').value,
+      cpf: el.querySelector('#fCpf').value.trim(),
+      banco: el.querySelector('#fBanco').value.trim(),
+      agencia: el.querySelector('#fAgencia').value.trim(),
+      conta: el.querySelector('#fConta').value.trim(),
       status: st.value,
       dataDemissao: st.value==='DEMITIDO' ? el.querySelector('#fDem').value : '',
       observacoes: el.querySelector('#fObs').value
@@ -1517,30 +1544,35 @@ function subAdmin(el, qual){
   if(qual==='filiais'){
     c.innerHTML = `
       <div class="barra">
-        <input class="entrada" id="novaFilial" placeholder="Nome da nova filial" style="flex:1;min-width:200px">
+        <input class="entrada" id="novaFilial" placeholder="Nome da nova filial" style="flex:1;min-width:180px">
+        <input class="entrada mono" id="novaFilialCnpj" placeholder="CNPJ (opcional)" style="min-width:170px">
         <button class="btn" id="addFilial">Adicionar filial</button>
       </div>
-      <table class="lista"><thead><tr><th>Filial</th><th>Funcionários</th><th></th></tr></thead><tbody>
+      <table class="lista"><thead><tr><th>Filial</th><th>CNPJ</th><th>Funcionários</th><th></th></tr></thead><tbody>
       ${S.filiais.map(f=>{
         const n = S.funcionarios.filter(x=>x.filial===f.nome).length;
         return `<tr>
           <td><input class="entrada" data-fil-nome="${f.id}" value="${esc(f.nome)}"></td>
+          <td><input class="entrada mono" data-fil-cnpj="${f.id}" value="${esc(f.cnpj||'')}"
+                     placeholder="00.000.000/0000-00" style="min-width:170px"></td>
           <td class="mono">${n}</td>
           <td style="text-align:right;white-space:nowrap">
             <button class="link-acao" data-fil-salvar="${f.id}">Salvar</button>
             <button class="link-acao rem" data-fil-excluir="${f.id}">Excluir</button>
           </td></tr>`;
-      }).join('') || '<tr><td colspan="3" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
+      }).join('') || '<tr><td colspan="4" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
       </tbody></table>`;
     c.querySelector('#addFilial').onclick = async ()=>{
       const nome = c.querySelector('#novaFilial').value.trim();
       if(!nome) return toast('Digite o nome da filial.', true);
-      await acao('salvarFilial',{nome}, el, qual, 'Filial adicionada.');
+      const cnpj = c.querySelector('#novaFilialCnpj').value.trim();
+      await acao('salvarFilial',{nome, cnpj}, el, qual, 'Filial adicionada.');
     };
     c.querySelectorAll('[data-fil-salvar]').forEach(b=> b.onclick = async ()=>{
       const id=b.dataset.filSalvar;
       const nome = c.querySelector(`[data-fil-nome="${id}"]`).value.trim();
-      await acao('salvarFilial',{id,nome}, el, qual, 'Filial atualizada.');
+      const cnpj = c.querySelector(`[data-fil-cnpj="${id}"]`).value.trim();
+      await acao('salvarFilial',{id,nome,cnpj}, el, qual, 'Filial atualizada.');
     });
     c.querySelectorAll('[data-fil-excluir]').forEach(b=> b.onclick = async ()=>{
       if(!confirm('Excluir esta filial?')) return;
@@ -1551,7 +1583,8 @@ function subAdmin(el, qual){
   if(qual==='usuarios'){
     c.innerHTML = `
       <div class="aviso info">O usuário <b>MASTER</b> entra apenas com a senha master e enxerga tudo.
-      O <b>Gerente RH</b> confirma a qualidade das fotos (amarelo → verde).
+      O <b>Gerente RH</b> confirma a qualidade das fotos (amarelo → verde) e recebe
+      automaticamente as abas que forem criadas depois do cadastro dele.
       Para o gerente de loja, escolha o papel <b>Gerente de filial</b>, informe a filial dele e marque
       só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.</div>
       <table class="lista"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>Abas visíveis</th><th></th></tr></thead><tbody id="tbUsers">
@@ -1641,7 +1674,9 @@ function linhaUsuario(u, novo){
       <option value="MASTER" ${u.papel==='MASTER'?'selected':''}>Master</option>
     </select></td>
     <td><select class="entrada" data-u="filial">${opsFil}</select></td>
-    <td><div class="chips">${chips}</div></td>
+    <td><div class="chips">${chips}
+      <button class="link-acao" data-u-todas="1" title="Marcar todas as abas">todas</button>
+    </div></td>
     <td style="text-align:right;white-space:nowrap">
       <button class="link-acao" data-u-salvar="1">${novo?'Criar':'Salvar'}</button>
       ${novo?'':'<button class="link-acao rem" data-u-excluir="1">Excluir</button>'}
@@ -1650,6 +1685,11 @@ function linhaUsuario(u, novo){
 
 function ligarUsuarios(c, el, qual){
   c.querySelectorAll('.chip').forEach(b=> b.onclick = ()=> b.classList.toggle('on'));
+  c.querySelectorAll('[data-u-todas]').forEach(b=> b.onclick = ()=>{
+    const chips = [...b.closest('td').querySelectorAll('.chip')];
+    const ligar = chips.some(x=>!x.classList.contains('on'));
+    chips.forEach(x=> x.classList.toggle('on', ligar));
+  });
   c.querySelectorAll('[data-u-salvar]').forEach(b=> b.onclick = async ()=>{
     const tr = b.closest('tr');
     const obj = {
@@ -2147,6 +2187,10 @@ const COLUNAS = [
   {campo:'dataAdmissao', nomes:['DATA ADMISSAO','DATA DE ADMISSAO','ADMISSAO','DATA ADMISSÃO','DATA DE ADMISSÃO','ADMISSÃO']},
   {campo:'dataDemissao', nomes:['DATA DEMISSAO','DATA DE DEMISSAO','DEMISSAO','DATA DEMISSÃO','DATA DE DEMISSÃO','DEMISSÃO']},
   {campo:'status',       nomes:['STATUS','SITUACAO','SITUAÇÃO']},
+  {campo:'cpf',          nomes:['CPF']},
+  {campo:'banco',        nomes:['BANCO']},
+  {campo:'agencia',      nomes:['AGENCIA','AGÊNCIA','AG']},
+  {campo:'conta',        nomes:['CONTA','CONTA CORRENTE','CC']},
   {campo:'observacoes',  nomes:['OBSERVACOES','OBSERVACAO','OBS','OBSERVAÇÕES','OBSERVAÇÃO','ANOTACOES','ANOTAÇÕES']}
 ];
 
@@ -2217,13 +2261,13 @@ function passoArquivo(el){
 async function baixarModelo(){
   await usar('xlsx');
   const dados = [
-    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','STATUS','OBSERVAÇÕES'],
-    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','EMPREGADO','Banco de horas em acordo'],
-    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','EMPREGADO',''],
-    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','DEMITIDO','Pediu demissão']
+    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','OBSERVAÇÕES'],
+    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','Banco de horas em acordo'],
+    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','EMPREGADO','','','','',''],
+    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','DEMITIDO','','','','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:40}];
+  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
@@ -2273,6 +2317,8 @@ async function lerPlanilha(el, arq){
         dataAdmissao: lerData(pega('dataAdmissao')),
         dataDemissao: lerData(pega('dataDemissao')),
         status: String(pega('status')||'').toUpperCase().includes('DEMIT') ? 'DEMITIDO' : 'EMPREGADO',
+        cpf: String(pega('cpf')||'').trim(), banco: String(pega('banco')||'').trim(),
+        agencia: String(pega('agencia')||'').trim(), conta: String(pega('conta')||'').trim(),
         observacoes: String(pega('observacoes')||'').trim()
       };
       item.aviso = '';
@@ -2365,7 +2411,8 @@ async function executarImportacao(el, linhas, duplicados){
         linhas: linhas.slice(i, i+lote).map(l=>({
           linha:l.linha, nome:l.nome, filial:l.filial, cargo:l.cargo,
           dataAdmissao:l.dataAdmissao, dataDemissao:l.dataDemissao,
-          status:l.status, observacoes:l.observacoes
+          status:l.status, observacoes:l.observacoes,
+          cpf:l.cpf, banco:l.banco, agencia:l.agencia, conta:l.conta
         })),
         duplicados, criarFiliais:true
       });
@@ -2509,14 +2556,18 @@ function apurar(cartao, cfg){
   const tol = +cfg.tolerancia;
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
-    atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, alertas:[], detalhe:[]
+    atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0,
+    alertas:[], detalhe:[]
   };
 
   cartao.dias.forEach(d=>{
+    const folga = String(d.definicao||'').toUpperCase()==='FOLGA';
     let mc = d.marcas.slice();
     if(!mc.length){
-      r.diasFalta++;
-      r.detalhe.push(Object.assign({}, d, {tipo:'FALTA', trabalhado:0, extra:0, extraNot:0, atraso:0}));
+      /* dia sem marcação: falta desconta, folga não */
+      if(folga) r.diasFolga++; else r.diasFalta++;
+      r.detalhe.push(Object.assign({}, d, {tipo: folga?'FOLGA':'FALTA',
+        trabalhado:0, extra:0, extraNot:0, atraso:0}));
       return;
     }
     if(mc.length % 2){
@@ -2645,7 +2696,8 @@ function gradeCartao(op){
         <table><thead><tr>
           <th style="width:96px">Data</th><th style="width:44px">Dia</th>
           <th>Marcações do dia</th><th style="width:86px">Carga</th>
-          <th style="width:64px">100%</th><th style="width:150px">Cálculo</th>
+          <th style="width:58px">Folga</th><th style="width:58px">100%</th>
+          <th style="width:150px">Cálculo</th>
         </tr></thead><tbody>
         ${dias.map((d,i)=>`<tr>
           <td class="mono">${esc(d.data)}</td>
@@ -2656,8 +2708,10 @@ function gradeCartao(op){
           <td><input class="entrada m-ch" data-i="${i}"
                      value="${esc(minParaHora(d.ch != null ? d.ch : horaParaMin(d.domingo ? calculoAtual().jornadaDomingo : calculoAtual().jornada)))}"
                      style="width:78px;font-family:'JetBrains Mono',monospace"></td>
+          <td style="text-align:center"><input type="checkbox" class="m-folga" data-i="${i}"
+                     ${d.folga?'checked':''} title="Folga: o dia não conta como falta"></td>
           <td style="text-align:center"><input type="checkbox" class="m-cem" data-i="${i}"
-                     ${d.cem?'checked':''} title="Feriado ou folga trabalhada: tudo a 100%"></td>
+                     ${d.cem?'checked':''} title="Feriado ou dia trabalhado na folga: tudo a 100%"></td>
           <td class="mono" id="mCalc${i}" style="color:var(--apagado)">—</td>
         </tr>`).join('')}
         </tbody></table>
@@ -2693,10 +2747,12 @@ function gradeCartao(op){
       const marcas = lerMarcacoes(el.querySelector(`.m-batida[data-i="${i}"]`).value);
       const chTxt = el.querySelector(`.m-ch[data-i="${i}"]`).value.trim();
       const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
+      const folga = el.querySelector(`.m-folga[data-i="${i}"]`).checked;
       const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada) : cfg.jornada;
       const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
-      return {data:d.data, semana:d.semana, definicao: cem?'Feriado':'Dia Normal',
-              marcas, ch, relDiurno:0, relNoturno:0, relSaldo:0};
+      /* folga só vale enquanto não há batida; com batida o dia é trabalho na folga */
+      const definicao = (folga && !marcas.length) ? 'Folga' : (cem || (folga && marcas.length)) ? 'Feriado' : 'Dia Normal';
+      return {data:d.data, semana:d.semana, definicao, marcas, ch, relDiurno:0, relNoturno:0, relSaldo:0};
     });
   };
 
@@ -2705,7 +2761,11 @@ function gradeCartao(op){
     r.detalhe.forEach((d,i)=>{
       const cel = q('#mCalc'+i);
       if(!cel) return;
-      if(!d.marcas.length){ cel.textContent='—'; cel.style.color='var(--apagado)'; return; }
+      if(!d.marcas.length){
+        cel.textContent = d.tipo==='FOLGA' ? 'folga' : 'falta';
+        cel.style.color = d.tipo==='FOLGA' ? 'var(--apagado)' : 'var(--vermelho)';
+        return;
+      }
       const partes = [minParaHora(d.trabalhado)];
       if(d.extra) partes.push('+'+minParaHora(d.extra));
       if(d.atraso) partes.push('-'+minParaHora(d.atraso));
@@ -2718,10 +2778,11 @@ function gradeCartao(op){
       <div><b style="color:var(--verde)">${minParaHora(r.he100)}</b> extras 100%</div>
       <div><b>${minParaHora(r.noturno)}</b> adicional noturno</div>
       <div><b style="color:var(--vermelho)">${minParaHora(r.atrasos)}</b> atrasos</div>
-      <div><b>${r.diasFalta}</b> dias sem marcação</div>`;
+      <div><b style="color:${r.diasFalta?'var(--vermelho)':'inherit'}">${r.diasFalta}</b> faltas</div>
+      <div><b>${r.diasFolga}</b> folgas</div>`;
   };
 
-  el.querySelectorAll('.m-batida, .m-ch, .m-cem').forEach(c=>{ c.oninput = atualizar; c.onchange = atualizar; });
+  el.querySelectorAll('.m-batida, .m-ch, .m-cem, .m-folga').forEach(c=>{ c.oninput = atualizar; c.onchange = atualizar; });
   el.querySelectorAll('.m-batida').forEach((c,i,todos)=>{
     c.onkeydown = ev=>{ if(ev.key==='Enter' && todos[i+1]){ ev.preventDefault(); todos[i+1].focus(); } };
   });
@@ -2783,7 +2844,7 @@ function guardarResultado(item, indice){
 /* foto nova: mês em branco para digitar */
 function digitarCartao(arquivo){
   const dias = diasDaCompetencia(S.competencia).map(d=>({
-    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null, cem:false
+    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null, cem:false, folga:false
   }));
   return gradeCartao({
     titulo:'Digitar marcações',
@@ -2803,12 +2864,14 @@ function editarResultado(i){
     data: d.data, semana: d.semana,
     domingo: String(d.semana||'').toLowerCase().indexOf('dom')===0,
     marcas: (d.marcas||[]).slice(), ch: d.ch,
-    cem: d.ch === 0 || String(d.definicao||'').toUpperCase() !== 'DIA NORMAL'
+    folga: String(d.definicao||'').toUpperCase() === 'FOLGA',
+    cem: d.ch === 0 || ['DIA NORMAL','FOLGA'].indexOf(String(d.definicao||'').toUpperCase()) < 0
   }));
   return gradeCartao({
     titulo: r.nome,
     subtitulo:'Corrigir marcações · '+esc(r.arquivo||'digitado'),
-    aviso:'Ajuste as batidas, a carga do dia ou marque um feriado. Os totais mudam na hora.',
+    aviso:'Ajuste as batidas, a carga do dia, marque um feriado ou troque uma falta por folga. '+
+          'Dia marcado como folga não entra na contagem de faltas. Os totais mudam na hora.',
     dias, nomeArquivo: r.arquivo, cargo: r.cargo,
     funcionarioId: r.funcionarioId, nome: r.nome,
     observacoes: r.observacoes, calculoId: r.calculoId,
@@ -2887,7 +2950,7 @@ function tabelaHoras(){
         <td class="mono" style="color:var(--verde);font-weight:700">${minParaHora(r.ap.he100)}</td>
         <td class="mono">${minParaHora(r.ap.noturno)}</td>
         <td class="mono" style="color:${r.ap.atrasos?'var(--vermelho)':'inherit'}">${minParaHora(r.ap.atrasos)}</td>
-        <td class="mono">${r.ap.diasFalta}</td>
+        <td class="mono">${r.ap.diasFalta}${r.ap.diasFolga?` <span style="color:var(--apagado)">+${r.ap.diasFolga} folga</span>`:''}</td>
         <td><input class="entrada obs-he" data-obs="${i}" value="${esc(r.observacoes||'')}"
                    placeholder="Anotação"></td>
         <td style="white-space:nowrap;text-align:right">
@@ -3025,7 +3088,8 @@ function detalheHoras(i){
         <div><b style="color:var(--verde)">${minParaHora(r.ap.he100)}</b> extras 100%</div>
         <div><b>${minParaHora(r.ap.noturno)}</b> adicional noturno</div>
         <div><b style="color:var(--vermelho)">${minParaHora(r.ap.atrasos)}</b> atrasos em ${r.ap.diasAtraso} dia(s)</div>
-        <div><b>${r.ap.diasFalta}</b> dias sem marcação</div>
+        <div><b style="color:${r.ap.diasFalta?'var(--vermelho)':'inherit'}">${r.ap.diasFalta}</b> faltas</div>
+        <div><b>${r.ap.diasFolga||0}</b> folgas</div>
       </div>
       ${r.ap.alertas.length?`<div class="aviso erro">${r.ap.alertas.map(esc).join('<br>')}</div>`:''}
       <div class="previa">
@@ -3035,7 +3099,8 @@ function detalheHoras(i){
         </tr></thead><tbody>
         ${r.ap.detalhe.map(d=>`<tr>
           <td class="mono">${esc(d.data)}</td><td>${esc(d.semana)}</td>
-          <td>${d.tipo==='FALTA'?'<span class="tag dup">Sem marcação</span>':esc(d.definicao)}</td>
+          <td>${d.tipo==='FALTA'?'<span class="tag erro">Falta</span>'
+                : d.tipo==='FOLGA'?'<span class="tag atual">Folga</span>':esc(d.definicao)}</td>
           <td class="mono" style="color:var(--apagado)">${d.marcas.map(minParaHora).join(' · ')||'—'}</td>
           <td class="mono">${minParaHora(d.trabalhado)}</td>
           <td class="mono" style="color:var(--apagado)">${minParaHora(d.ch)}</td>
@@ -3077,7 +3142,7 @@ function linhasResumo(){
   return [['FUNCIONÁRIO','FILIAL','CARGO','PERÍODO','CÁLCULO','JORNADA','JORNADA DOMINGO',
            'DIAS TRABALHADOS','DIAS SEM MARCAÇÃO',
            'HORAS TRABALHADAS','HE 50%','HE 100%','HE NOTURNAS','ADICIONAL NOTURNO',
-           'ATRASOS','DIAS COM ATRASO','OBSERVAÇÕES']]
+           'ATRASOS','DIAS COM ATRASO','DIAS DE FOLGA','OBSERVAÇÕES']]
     .concat(S.he.resultados.map(r=>[
       r.nome, r.filial||'', r.cargo||'', r.periodoIni+' a '+r.periodoFim,
       calculoPor(r.calculoId).nome, calculoPor(r.calculoId).jornada,
@@ -3085,7 +3150,7 @@ function linhasResumo(){
       r.ap.diasTrabalhados, r.ap.diasFalta, minParaHora(r.ap.trabalhado),
       minParaHora(r.ap.he50), minParaHora(r.ap.he100), minParaHora(r.ap.heNoturnas),
       minParaHora(r.ap.noturno), minParaHora(r.ap.atrasos), r.ap.diasAtraso,
-      r.observacoes || ''
+      r.ap.diasFolga || 0, r.observacoes || ''
     ]));
 }
 
@@ -3099,7 +3164,7 @@ async function exportarHorasExcel(){
 
   const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH','EXTRA','EXTRA NOTURNA','ATRASO']];
   S.he.resultados.forEach(r=> r.ap.detalhe.forEach(d=> det.push([
-    r.nome, d.data, d.semana, d.tipo==='FALTA'?'SEM MARCAÇÃO':d.definicao,
+    r.nome, d.data, d.semana, d.tipo==='FALTA'?'FALTA':d.tipo==='FOLGA'?'FOLGA':d.definicao,
     d.marcas.map(minParaHora).join(' '), minParaHora(d.trabalhado), minParaHora(d.ch),
     minParaHora(d.extra), minParaHora(d.extraNot||0), minParaHora(d.atraso)
   ])));
