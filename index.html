@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01b';
+  const VERSAO_APP = '2026.09.01c';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -324,6 +324,25 @@ table.lista tr:last-child td{border-bottom:none}
   .tab-func th:nth-child(3),.tab-func th:nth-child(4),.tab-func th:nth-child(10){display:none}
 }
 
+/* ---------- FOLHA DE PAGAMENTO ---------- */
+.tab-folha{width:100%;border-collapse:collapse;font-size:13px;min-width:980px}
+.tab-folha th{
+  position:sticky;top:0;background:#f6f7f9;text-align:left;padding:7px 9px;
+  font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--apagado);
+  font-weight:700;border-bottom:1px solid var(--linha);white-space:nowrap;z-index:2;
+}
+.tab-folha td{padding:4px 9px;border-bottom:1px solid #f1f3f5;white-space:nowrap}
+.tab-folha tbody tr:hover{background:#fafbfc}
+.tab-folha .t-nome{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tab-folha .t-apagado{color:var(--apagado)}
+.tab-folha .t-total{text-align:right;font-weight:600;background:#fafcfb}
+.tab-folha tfoot td{background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px;text-align:right}
+.tab-folha tfoot td:first-child{text-align:left}
+.cel-folha{padding:4px 7px;font-size:13px;width:100%;min-width:78px}
+.cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
+.cel-folha.numero{min-width:58px}
+.cel-folha:focus{background:#fffdf5}
+
 /* ---------- CONTABILIDADE ---------- */
 .tab-cont{min-width:1180px}
 .tab-cont th{white-space:nowrap;font-size:9px}
@@ -559,7 +578,9 @@ const S = {
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
-  cont:{ competencia:null, linhas:{}, apuracoes:[] }
+  cont:{ competencia:null, linhas:{}, apuracoes:[] },
+  grupos:[],
+  folha:{ competencia:null, linhas:{}, diasPadrao:'' }
 };
 
 const ROTULO_ABA = {
@@ -568,7 +589,8 @@ const ROTULO_ABA = {
   EX_FUNCIONARIOS:'Ex-funcionários',
   PENDENCIAS:'Pendências',
   HORAS_EXTRAS:'Horas extras',
-  CONTABILIDADE:'Contabilidade'
+  CONTABILIDADE:'Contabilidade',
+  FOLHA:'Folha de pagamento'
 };
 
 /* ==================================================================
@@ -714,6 +736,8 @@ function aplicarCarga(d){
   S.prazos = d.prazos;
   S.versaoServidor = d.versao || '';
   S.he.calculos = d.calculos || [];
+  S.grupos = d.grupos || [];
+  if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
   if(S.cont.competencia && S.cont.competencia !== S.competencia) S.cont.competencia = null;
   if(!S.he.calculos.find(c=>c.id===S.he.calculoId)){
     S.he.calculoId = S.he.calculos.length ? S.he.calculos[0].id : '';
@@ -798,10 +822,12 @@ function desenhar(){
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
+  else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='CONTABILIDADE') ligarContabilidade();
+  if(S.aba==='FOLHA') ligarFolha();
 }
 
 function barraFiltros(comBotao){
@@ -1572,19 +1598,23 @@ function subAdmin(el, qual){
         <input class="entrada mono" id="novaFilialCnpj" placeholder="CNPJ (opcional)" style="min-width:170px">
         <button class="btn" id="addFilial">Adicionar filial</button>
       </div>
-      <table class="lista"><thead><tr><th>Filial</th><th>CNPJ</th><th>Funcionários</th><th></th></tr></thead><tbody>
+      <table class="lista"><thead><tr><th>Filial</th><th>CNPJ</th><th>Grupo VT/VR</th><th>Funcionários</th><th></th></tr></thead><tbody>
       ${S.filiais.map(f=>{
         const n = S.funcionarios.filter(x=>x.filial===f.nome).length;
         return `<tr>
           <td><input class="entrada" data-fil-nome="${f.id}" value="${esc(f.nome)}"></td>
           <td><input class="entrada mono" data-fil-cnpj="${f.id}" value="${esc(f.cnpj||'')}"
                      placeholder="00.000.000/0000-00" style="min-width:170px"></td>
+          <td><select class="entrada" data-fil-grupo="${f.id}">
+            <option value="">— sem grupo —</option>
+            ${S.grupos.map(g=>`<option value="${esc(g.nome)}" ${g.nome===f.grupo?'selected':''}>${esc(g.nome)}</option>`).join('')}
+          </select></td>
           <td class="mono">${n}</td>
           <td style="text-align:right;white-space:nowrap">
             <button class="link-acao" data-fil-salvar="${f.id}">Salvar</button>
             <button class="link-acao rem" data-fil-excluir="${f.id}">Excluir</button>
           </td></tr>`;
-      }).join('') || '<tr><td colspan="4" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
+      }).join('') || '<tr><td colspan="5" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
       </tbody></table>`;
     c.querySelector('#addFilial').onclick = async ()=>{
       const nome = c.querySelector('#novaFilial').value.trim();
@@ -1596,7 +1626,8 @@ function subAdmin(el, qual){
       const id=b.dataset.filSalvar;
       const nome = c.querySelector(`[data-fil-nome="${id}"]`).value.trim();
       const cnpj = c.querySelector(`[data-fil-cnpj="${id}"]`).value.trim();
-      await acao('salvarFilial',{id,nome,cnpj}, el, qual, 'Filial atualizada.');
+      const grupo = c.querySelector(`[data-fil-grupo="${id}"]`).value;
+      await acao('salvarFilial',{id,nome,cnpj,grupo}, el, qual, 'Filial atualizada.');
     });
     c.querySelectorAll('[data-fil-excluir]').forEach(b=> b.onclick = async ()=>{
       if(!confirm('Excluir esta filial?')) return;
@@ -1688,7 +1719,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','CONTABILIDADE'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','CONTABILIDADE','FOLHA'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -1747,6 +1778,370 @@ async function acao(nome, dados, el, qual, msg){
     await recarregar();
     subAdmin(el, qual);
     toast(msg);
+  }catch(e){ toast(e.message,true); }
+  finally{ carregando(false); }
+}
+
+/* ==================================================================
+   ABA FOLHA DE PAGAMENTO
+   VT e VR vêm do grupo de valores da filial (lojas de rua, shopping,
+   cada cidade). O total é o valor diário vezes os dias trabalhados.
+   ================================================================== */
+function grupoDaFilial(nomeFilial){
+  const fil = S.filiais.find(x=>x.nome===nomeFilial);
+  if(!fil || !fil.grupo) return null;
+  return S.grupos.find(g=>g.nome===fil.grupo) || null;
+}
+
+function linhaFolhaDe(f){
+  const l = S.folha.linhas[f.id] || {};
+  const g = grupoDaFilial(f.filial);
+  const vt = l.vtDiario !== undefined && l.vtDiario !== '' ? l.vtDiario : (g ? g.vtDiario : '');
+  const vr = l.vrDiario !== undefined && l.vrDiario !== '' ? l.vrDiario : (g ? g.vrDiario : '');
+  const dias = l.dias || '';
+  return {
+    grupo: g ? g.nome : '', vtDiario: vt, vrDiario: vr, dias,
+    vale: l.vale || '', observacoes: l.observacoes || '',
+    totalVt: valorNum(vt) * valorNum(dias),
+    totalVr: valorNum(vr) * valorNum(dias)
+  };
+}
+
+function funcionariosDaFolha(){
+  return S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
+}
+
+function telaFolha(){
+  if(S.folha.competencia !== S.competencia){
+    carregarFolha();
+    return `<div class="filial"><div class="vazio">Carregando a folha de ${compBonita(S.competencia)}…</div></div>`;
+  }
+  const lista = funcionariosDaFolha();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+  const semGrupo = [...new Set(lista.filter(f=>!grupoDaFilial(f.filial)).map(f=>f.filial))];
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <div style="display:flex;gap:6px;align-items:flex-end">
+      <div><label class="campo-lbl" for="folhaDias">Dias</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="folhaDias"
+               value="${esc(S.folha.diasPadrao||'')}" style="width:76px"></div>
+      <button class="btn sec" id="folhaAplicar">Aplicar a todos</button>
+    </div>
+    <button class="btn sec" id="folhaExcel">Excel</button>
+    <button class="btn sec" id="folhaPdf">PDF</button>
+    <button class="btn" id="folhaSalvar">Salvar folha</button>
+  </div>
+  <div class="aviso info">
+    Folha de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
+    O VT e o VR vêm do grupo de valores da filial e podem ser ajustados linha a linha.
+    Os totais são o valor diário vezes os dias.
+  </div>
+  ${semGrupo.length ? `<div class="aviso erro">Sem grupo de valores definido:
+    <b>${semGrupo.map(esc).join(', ')}</b>. Defina o grupo de cada filial na tabela
+    de valores, no pé desta aba.</div>` : ''}`;
+
+  if(lista.length){
+    html += `<div class="painel" style="padding:0"><div class="rolagem">
+      <table class="tab-folha"><thead><tr>
+        <th>Funcionário</th><th>Filial</th><th>VT/dia</th><th>Dias</th><th>Total VT</th>
+        <th>VR/dia</th><th>Total VR</th><th>Vale mensal</th><th>Observações</th>
+      </tr></thead><tbody>
+      ${lista.map(f=>{
+        const d = linhaFolhaDe(f);
+        return `<tr>
+          <td class="t-nome">${esc(f.nome)}</td>
+          <td class="t-apagado" title="${esc(d.grupo||'sem grupo')}">${esc(f.filial||'—')}</td>
+          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vtDiario"
+                     value="${esc(d.vtDiario)}"></td>
+          <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
+                     value="${esc(d.dias)}"></td>
+          <td class="mono t-total">${moeda(d.totalVt)}</td>
+          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vrDiario"
+                     value="${esc(d.vrDiario)}"></td>
+          <td class="mono t-total">${moeda(d.totalVr)}</td>
+          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vale"
+                     value="${esc(d.vale)}"></td>
+          <td><input class="entrada cel-folha" data-f="${f.id}" data-campo="observacoes"
+                     value="${esc(d.observacoes)}" placeholder="Anotação"></td>
+        </tr>`;
+      }).join('')}
+      </tbody><tfoot><tr>
+        <td><b>TOTAL</b></td><td></td><td></td>
+        <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)}</b></td>
+        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
+        <td></td>
+        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
+        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).vale),0))}</b></td>
+        <td></td>
+      </tr></tfoot></table></div></div>`;
+  }else{
+    html += vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
+  }
+
+  html += painelGrupos();
+  return html;
+}
+
+function painelGrupos(){
+  const usoPorGrupo = {};
+  S.filiais.forEach(f=>{ if(f.grupo) (usoPorGrupo[f.grupo] = usoPorGrupo[f.grupo]||[]).push(f.nome); });
+
+  return `
+  <section class="filial" style="margin-top:18px">
+    <div class="filial-topo">
+      <div>
+        <div class="filial-nome">Valores diários de VT e VR</div>
+        <div class="filial-qtd">Por região e tipo de loja · preenchem a folha automaticamente</div>
+      </div>
+    </div>
+    <div style="padding:16px">
+      <div class="rolagem">
+        <table class="lista" style="min-width:640px"><thead><tr>
+          <th>Grupo</th><th style="width:120px">VT por dia</th><th style="width:120px">VR por dia</th>
+          <th>Filiais neste grupo</th><th></th>
+        </tr></thead><tbody>
+        ${S.grupos.map(g=>`<tr data-g-id="${esc(g.id)}">
+          <td><input class="entrada" data-g="nome" value="${esc(g.nome)}" style="min-width:190px"></td>
+          <td><input class="entrada mono" data-g="vtDiario" value="${esc(g.vtDiario||'')}"
+                     placeholder="0,00" style="text-align:right"></td>
+          <td><input class="entrada mono" data-g="vrDiario" value="${esc(g.vrDiario||'')}"
+                     placeholder="0,00" style="text-align:right"></td>
+          <td style="font-size:12px;color:var(--apagado)">${esc((usoPorGrupo[g.nome]||[]).join(', ') || 'nenhuma filial')}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="link-acao" data-g-salvar="1">Salvar</button>
+            <button class="link-acao rem" data-g-excluir="1">Excluir</button>
+          </td></tr>`).join('')}
+        <tr data-g-id="" data-novo="1">
+          <td><input class="entrada" data-g="nome" placeholder="Ex.: SHOPPING MARINGÁ" style="min-width:190px"></td>
+          <td><input class="entrada mono" data-g="vtDiario" placeholder="0,00" style="text-align:right"></td>
+          <td><input class="entrada mono" data-g="vrDiario" placeholder="0,00" style="text-align:right"></td>
+          <td style="font-size:12px;color:var(--apagado)">defina o grupo de cada filial abaixo</td>
+          <td style="text-align:right"><button class="link-acao" data-g-salvar="1">Criar</button></td>
+        </tr>
+        </tbody></table>
+      </div>
+
+      <div class="titulo-grupo">Grupo de cada filial</div>
+      <div class="rolagem">
+        <table class="lista" style="min-width:520px"><thead><tr>
+          <th>Filial</th><th style="width:260px">Grupo de valores</th><th>VT/dia</th><th>VR/dia</th>
+        </tr></thead><tbody>
+        ${S.filiais.map(f=>{
+          const g = S.grupos.find(x=>x.nome===f.grupo);
+          return `<tr>
+            <td><b>${esc(f.nome)}</b></td>
+            <td><select class="entrada" data-filial-grupo="${esc(f.id)}">
+              <option value="">— sem grupo —</option>
+              ${S.grupos.map(x=>`<option value="${esc(x.nome)}" ${x.nome===f.grupo?'selected':''}>${esc(x.nome)}</option>`).join('')}
+            </select></td>
+            <td class="mono">${esc(g&&g.vtDiario?moeda(valorNum(g.vtDiario)):'—')}</td>
+            <td class="mono">${esc(g&&g.vrDiario?moeda(valorNum(g.vrDiario)):'—')}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="4" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
+        </tbody></table>
+      </div>
+    </div>
+  </section>`;
+}
+
+async function carregarFolha(){
+  carregando(true);
+  try{
+    const linhas = await api('listarFolha', {competencia:S.competencia});
+    S.folha.linhas = {};
+    linhas.forEach(l=>{ S.folha.linhas[l.funcionarioId] = l; });
+    S.folha.competencia = S.competencia;
+    desenhar();
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function ligarFolha(){
+  document.querySelectorAll('.cel-folha').forEach(c=>{
+    c.oninput = ()=>{
+      const l = S.folha.linhas[c.dataset.f] || (S.folha.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
+      l[c.dataset.campo] = c.value;
+      if(c.dataset.campo!=='observacoes') atualizarTotaisFolha();
+    };
+    c.onblur = ()=>{ if(c.classList.contains('dinheiro') && c.value.trim()){
+      c.value = moeda(valorNum(c.value));
+      S.folha.linhas[c.dataset.f][c.dataset.campo] = c.value;
+      atualizarTotaisFolha();
+    }};
+  });
+
+  const b = id => document.getElementById(id);
+  if(b('folhaDias')) b('folhaDias').oninput = e=>{ S.folha.diasPadrao = e.target.value; };
+  if(b('folhaAplicar')) b('folhaAplicar').onclick = ()=>{
+    const d = String(S.folha.diasPadrao||'').trim();
+    if(!d) return toast('Digite a quantidade de dias antes de aplicar.', true);
+    funcionariosDaFolha().forEach(f=>{
+      const l = S.folha.linhas[f.id] || (S.folha.linhas[f.id] = {funcionarioId:f.id});
+      l.dias = d;
+    });
+    desenhar();
+    toast(d+' dias aplicados a todos os funcionários da lista.');
+  };
+  if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolha;
+  if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
+  if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
+
+  /* grupos de valores */
+  document.querySelectorAll('[data-g-salvar]').forEach(x=> x.onclick = async ()=>{
+    const tr = x.closest('tr');
+    const v = campo => tr.querySelector(`[data-g="${campo}"]`).value;
+    const grupo = {id: tr.dataset.novo ? '' : tr.dataset.gId,
+                   nome: v('nome'), vtDiario: v('vtDiario'), vrDiario: v('vrDiario')};
+    if(!grupo.nome.trim()) return toast('Dê um nome ao grupo.', true);
+    carregando(true);
+    try{ await api('salvarGrupo', {grupo}); await recarregar(); toast('Valores salvos.'); }
+    catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+  document.querySelectorAll('[data-g-excluir]').forEach(x=> x.onclick = async ()=>{
+    const tr = x.closest('tr');
+    if(!confirm('Excluir o grupo '+tr.querySelector('[data-g="nome"]').value+'?')) return;
+    carregando(true);
+    try{ await api('excluirGrupo', {id:tr.dataset.gId}); await recarregar(); toast('Grupo excluído.'); }
+    catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+  document.querySelectorAll('[data-filialGrupo], [data-filial-grupo]').forEach(sel=>
+    sel.onchange = async ()=>{
+      const fil = S.filiais.find(f=>f.id===sel.dataset.filialGrupo);
+      carregando(true);
+      try{
+        await api('salvarFilial', {id:fil.id, nome:fil.nome, cnpj:fil.cnpj||'', grupo:sel.value});
+        await recarregar();
+        toast(fil.nome+' → '+(sel.value||'sem grupo'));
+      }catch(e){ toast(e.message, true); }
+      finally{ carregando(false); }
+    });
+}
+
+function atualizarTotaisFolha(){
+  /* redesenha só os totais, para não perder o foco do campo em edição */
+  const lista = funcionariosDaFolha();
+  const linhas = document.querySelectorAll('.tab-folha tbody tr');
+  lista.forEach((f,i)=>{
+    const d = linhaFolhaDe(f);
+    const tds = linhas[i] && linhas[i].querySelectorAll('.t-total');
+    if(tds && tds.length===2){ tds[0].textContent = moeda(d.totalVt); tds[1].textContent = moeda(d.totalVr); }
+  });
+  const pe = document.querySelectorAll('.tab-folha tfoot b');
+  if(pe.length===4){
+    pe[0].textContent = lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0);
+    pe[1].textContent = moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0));
+    pe[2].textContent = moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0));
+    pe[3].textContent = moeda(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).vale),0));
+  }
+}
+
+async function salvarFolha(){
+  const lista = funcionariosDaFolha();
+  const itens = lista.map(f=>{
+    const d = linhaFolhaDe(f);
+    return {
+      funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
+      vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
+      vrDiario:d.vrDiario, totalVr:moeda(d.totalVr), vale:d.vale, observacoes:d.observacoes
+    };
+  }).filter(it=> it.dias || it.vale || it.observacoes);
+  if(!itens.length) return toast('Preencha ao menos os dias de alguém antes de salvar.', true);
+  carregando(true);
+  try{
+    const r = await api('salvarFolha', {competencia:S.competencia, itens});
+    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+'.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function tabelaFolha(){
+  const lista = funcionariosDaFolha();
+  const cab = ['FUNCIONÁRIO','FILIAL','GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR','VALE MENSAL','OBSERVAÇÕES'];
+  const linhas = lista.map(f=>{
+    const d = linhaFolhaDe(f);
+    return [f.nome, f.filial, d.grupo, d.vtDiario, d.dias, moeda(d.totalVt),
+            d.vrDiario, moeda(d.totalVr), d.vale, d.observacoes];
+  });
+  const total = ['TOTAL','','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
+    moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
+    moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0)),
+    moeda(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).vale),0)), ''];
+  return {cab, linhas, total};
+}
+
+async function exportarFolhaExcel(){
+  await usar('xlsx');
+  const {cab, linhas, total} = tabelaFolha();
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
+  ws['!cols'] = [{wch:36},{wch:18},{wch:24},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},{wch:14},{wch:30}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
+  XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
+}
+
+async function exportarFolhaPdf(){
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+    const {cab, linhas, total} = tabelaFolha();
+    const L=841.89, A=595.28, m=30;
+    const larg = [176, 88, 96, 54, 34, 62, 54, 62, 62];
+    const xs = []; let acc = m;
+    larg.forEach(w=>{ xs.push(acc); acc += w; });
+    const corta = (t,max)=>{ t=String(t||''); return t.length>max?t.slice(0,max-1)+'…':t; };
+
+    let pg, y;
+    const cabecalho = ()=>{
+      pg = doc.addPage([L,A]); y = A-38;
+      const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
+      pg.drawText('Folha de pagamento · '+compBonita(S.competencia),
+        {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
+      y -= 44;
+      cab.slice(0,larg.length).forEach((t,i)=>
+        pg.drawText(corta(t,14),{x:xs[i], y, size:6.5, font:fonteB, color:rgb(.42,.45,.5)}));
+      y -= 6;
+      pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.7, color:rgb(.8,.83,.86)});
+      y -= 12;
+    };
+    cabecalho();
+    linhas.forEach(l=>{
+      if(y < m+26) cabecalho();
+      l.slice(0,larg.length).forEach((t,i)=>
+        pg.drawText(corta(t, i===0?32:i===2?17:11),{x:xs[i], y, size:7.5,
+          font: (i===5||i===7)?fonteB:fonte, color:rgb(.06,.07,.08)}));
+      y -= 7;
+      pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
+      y -= 11;
+    });
+    if(y < m+26) cabecalho();
+    y -= 3;
+    total.slice(0,larg.length).forEach((t,i)=>{
+      if(t) pg.drawText(corta(t,12),{x:xs[i], y, size:8, font:fonteB});
+    });
+    baixar(new Blob([await doc.save()],{type:'application/pdf'}),
+      'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.pdf');
+    toast('Relatório gerado.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
@@ -2214,7 +2609,7 @@ const COLUNAS = [
   {campo:'nome',         nomes:['NOME','NOME COMPLETO','FUNCIONARIO','FUNCIONÁRIO','COLABORADOR']},
   {campo:'filial',       nomes:['FILIAL','LOJA','UNIDADE']},
   {campo:'cargo',        nomes:['CARGO','FUNCAO','FUNÇÃO']},
-  {campo:'dataAdmissao', nomes:['DATA ADMISSAO','DATA DE ADMISSAO','ADMISSAO','DATA ADMISSÃO','DATA DE ADMISSÃO','ADMISSÃO']},
+  {campo:'dataAdmissao', nomes:['ADMISSAO','ADMISSÃO','DATA ADMISSAO','DATA DE ADMISSAO','DATA ADMISSÃO','DATA DE ADMISSÃO']},
   {campo:'dataInicio',   nomes:['INICIO','INÍCIO','DATA INICIO','DATA INÍCIO','DATA DE INICIO','DATA DE INÍCIO']},
   {campo:'dataDemissao', nomes:['DATA DEMISSAO','DATA DE DEMISSAO','DEMISSAO','DATA DEMISSÃO','DATA DE DEMISSÃO','DEMISSÃO']},
   {campo:'status',       nomes:['STATUS','SITUACAO','SITUAÇÃO']},
@@ -2265,9 +2660,11 @@ function abrirImportacao(){
 function passoArquivo(el){
   el.querySelector('#impCorpo').innerHTML = `
     <div class="aviso info">
-      A planilha precisa ter uma linha de títulos com as colunas
-      <b>NOME</b>, <b>FILIAL</b>, <b>CARGO</b>, <b>DATA ADMISSÃO</b>, <b>STATUS</b> e <b>OBSERVAÇÕES</b>.
+      Colunas reconhecidas: <b>NOME</b>, <b>CARGO</b>, <b>FILIAL</b>, <b>AGÊNCIA</b>,
+      <b>CONTA</b>, <b>BANCO</b>, <b>CPF</b>, <b>INÍCIO</b>, <b>ADMISSÃO</b>, <b>SITUAÇÃO</b>,
+      além de <b>TIPO CONTA</b> e <b>OBSERVAÇÕES</b>.
       A ordem não importa e colunas extras são ignoradas. Aceita .xlsx, .xls e .csv.
+      Só NOME e FILIAL são obrigatórios. Baixe o modelo abaixo se quiser o formato pronto.
     </div>
     <div class="solta" id="areaSolta">
       <b>Escolher planilha</b>
@@ -2293,13 +2690,13 @@ function passoArquivo(el){
 async function baixarModelo(){
   await usar('xlsx');
   const dados = [
-    ['NOME','FILIAL','CARGO','DATA ADMISSÃO','INÍCIO','STATUS','CPF','BANCO','AGÊNCIA','CONTA','TIPO CONTA','OBSERVAÇÕES'],
-    ['MARIA APARECIDA DA SILVA','CENTRO','VENDEDORA','03/02/2024','15/01/2024','EMPREGADO','000.000.000-00','ITAÚ','1234','56789-0','CORRENTE','Banco de horas em acordo'],
-    ['JOÃO PEDRO SOUZA','BATEL','ESTOQUISTA','15/08/2023','','EMPREGADO','','','','','POUPANÇA',''],
-    ['ANA CLARA MARTINS','CENTRO','CAIXA','10/01/2022','','DEMITIDO','','','','','','Pediu demissão']
+    ['NOME','CARGO','FILIAL','AGÊNCIA','CONTA','BANCO','CPF','INÍCIO','ADMISSÃO','SITUAÇÃO','TIPO CONTA','OBSERVAÇÕES'],
+    ['MARIA APARECIDA DA SILVA','VENDEDORA','CENTRO','1234','56789-0','ITAÚ','000.000.000-00','15/01/2024','03/02/2024','EMPREGADO','CORRENTE','Banco de horas em acordo'],
+    ['JOÃO PEDRO SOUZA','ESTOQUISTA','BATEL','0001','11122-3','CAIXA','','','15/08/2023','EMPREGADO','POUPANÇA',''],
+    ['ANA CLARA MARTINS','CAIXA','CENTRO','','','','','','10/01/2022','DEMITIDO','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:16},{wch:18},{wch:16},{wch:14},{wch:14},{wch:18},{wch:14},{wch:10},{wch:14},{wch:13},{wch:40}];
+  ws['!cols'] = [{wch:34},{wch:18},{wch:16},{wch:10},{wch:14},{wch:14},{wch:18},{wch:14},{wch:14},{wch:14},{wch:13},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
