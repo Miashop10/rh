@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01c';
+  const VERSAO_APP = '2026.09.01d';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -342,6 +342,29 @@ table.lista tr:last-child td{border-bottom:none}
 .cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-folha.numero{min-width:58px}
 .cel-folha:focus{background:#fffdf5}
+
+/* ---------- TABELAS COMPACTAS DE VALORES ---------- */
+.grade-valores{
+  display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+  gap:14px 28px;padding:14px 16px 18px;align-items:start;
+}
+.mini-tab{width:100%;border-collapse:collapse;font-size:12px}
+.mini-tab th{
+  text-align:left;padding:4px 6px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--apagado);font-weight:700;border-bottom:1px solid var(--linha);white-space:nowrap;
+}
+.mini-tab td{padding:2px 6px;border-bottom:1px solid #f4f5f7}
+.mini-tab tr:last-child td{border-bottom:none}
+.mini-tab .f-nome{font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini-tab .g-uso{text-align:center;color:var(--apagado);font-family:'JetBrains Mono',monospace}
+.g-campo{padding:3px 6px;font-size:12px;width:100%;min-width:0;border-color:transparent;background:transparent}
+.g-campo:hover{border-color:var(--linha)}
+.g-campo:focus{border-color:var(--tinta);background:#fffdf5}
+.g-campo.mono{text-align:right}
+select.g-campo.sem{color:var(--ambar)}
+.g-x{color:#c2c8d0;font-size:13px;line-height:1;padding:2px 4px;border-radius:2px}
+.g-x:hover{color:var(--vermelho);background:var(--vermelho-suave)}
+@media(max-width:820px){.grade-valores{grid-template-columns:1fr}}
 
 /* ---------- CONTABILIDADE ---------- */
 .tab-cont{min-width:1180px}
@@ -1896,61 +1919,52 @@ function telaFolha(){
 }
 
 function painelGrupos(){
-  const usoPorGrupo = {};
-  S.filiais.forEach(f=>{ if(f.grupo) (usoPorGrupo[f.grupo] = usoPorGrupo[f.grupo]||[]).push(f.nome); });
+  const qtd = {};
+  S.filiais.forEach(f=>{ if(f.grupo) qtd[f.grupo] = (qtd[f.grupo]||0)+1; });
+
+  const linhaGrupo = (g, novo) => `
+    <tr data-g-id="${esc(g.id||'')}" ${novo?'data-novo="1"':''}>
+      <td><input class="entrada g-campo" data-g="nome" value="${esc(g.nome||'')}"
+                 placeholder="${novo?'+ novo grupo':''}"></td>
+      <td><input class="entrada g-campo mono" data-g="vtDiario" value="${esc(g.vtDiario||'')}"
+                 placeholder="0,00"></td>
+      <td><input class="entrada g-campo mono" data-g="vrDiario" value="${esc(g.vrDiario||'')}"
+                 placeholder="0,00"></td>
+      <td class="g-uso">${novo?'':(qtd[g.nome]||0)}</td>
+      <td>${novo?'':`<button class="g-x" data-g-excluir="1" title="Excluir grupo">✕</button>`}</td>
+    </tr>`;
 
   return `
   <section class="filial" style="margin-top:18px">
     <div class="filial-topo">
       <div>
         <div class="filial-nome">Valores diários de VT e VR</div>
-        <div class="filial-qtd">Por região e tipo de loja · preenchem a folha automaticamente</div>
+        <div class="filial-qtd">Alterou um valor, sai do campo e já salva</div>
       </div>
     </div>
-    <div style="padding:16px">
-      <div class="rolagem">
-        <table class="lista" style="min-width:640px"><thead><tr>
-          <th>Grupo</th><th style="width:120px">VT por dia</th><th style="width:120px">VR por dia</th>
-          <th>Filiais neste grupo</th><th></th>
+    <div class="grade-valores">
+      <div>
+        <div class="titulo-grupo" style="margin-top:0">Por grupo</div>
+        <table class="mini-tab"><thead><tr>
+          <th>Grupo</th><th style="width:74px">VT/dia</th><th style="width:74px">VR/dia</th>
+          <th style="width:34px" title="Filiais no grupo">Fil.</th><th style="width:26px"></th>
         </tr></thead><tbody>
-        ${S.grupos.map(g=>`<tr data-g-id="${esc(g.id)}">
-          <td><input class="entrada" data-g="nome" value="${esc(g.nome)}" style="min-width:190px"></td>
-          <td><input class="entrada mono" data-g="vtDiario" value="${esc(g.vtDiario||'')}"
-                     placeholder="0,00" style="text-align:right"></td>
-          <td><input class="entrada mono" data-g="vrDiario" value="${esc(g.vrDiario||'')}"
-                     placeholder="0,00" style="text-align:right"></td>
-          <td style="font-size:12px;color:var(--apagado)">${esc((usoPorGrupo[g.nome]||[]).join(', ') || 'nenhuma filial')}</td>
-          <td style="text-align:right;white-space:nowrap">
-            <button class="link-acao" data-g-salvar="1">Salvar</button>
-            <button class="link-acao rem" data-g-excluir="1">Excluir</button>
-          </td></tr>`).join('')}
-        <tr data-g-id="" data-novo="1">
-          <td><input class="entrada" data-g="nome" placeholder="Ex.: SHOPPING MARINGÁ" style="min-width:190px"></td>
-          <td><input class="entrada mono" data-g="vtDiario" placeholder="0,00" style="text-align:right"></td>
-          <td><input class="entrada mono" data-g="vrDiario" placeholder="0,00" style="text-align:right"></td>
-          <td style="font-size:12px;color:var(--apagado)">defina o grupo de cada filial abaixo</td>
-          <td style="text-align:right"><button class="link-acao" data-g-salvar="1">Criar</button></td>
-        </tr>
+        ${S.grupos.map(g=>linhaGrupo(g)).join('')}
+        ${linhaGrupo({}, true)}
         </tbody></table>
       </div>
-
-      <div class="titulo-grupo">Grupo de cada filial</div>
-      <div class="rolagem">
-        <table class="lista" style="min-width:520px"><thead><tr>
-          <th>Filial</th><th style="width:260px">Grupo de valores</th><th>VT/dia</th><th>VR/dia</th>
+      <div>
+        <div class="titulo-grupo" style="margin-top:0">Grupo de cada filial</div>
+        <table class="mini-tab"><thead><tr>
+          <th>Filial</th><th style="width:52%">Grupo</th>
         </tr></thead><tbody>
-        ${S.filiais.map(f=>{
-          const g = S.grupos.find(x=>x.nome===f.grupo);
-          return `<tr>
-            <td><b>${esc(f.nome)}</b></td>
-            <td><select class="entrada" data-filial-grupo="${esc(f.id)}">
-              <option value="">— sem grupo —</option>
-              ${S.grupos.map(x=>`<option value="${esc(x.nome)}" ${x.nome===f.grupo?'selected':''}>${esc(x.nome)}</option>`).join('')}
-            </select></td>
-            <td class="mono">${esc(g&&g.vtDiario?moeda(valorNum(g.vtDiario)):'—')}</td>
-            <td class="mono">${esc(g&&g.vrDiario?moeda(valorNum(g.vrDiario)):'—')}</td>
-          </tr>`;
-        }).join('') || '<tr><td colspan="4" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
+        ${S.filiais.map(f=>`<tr>
+          <td class="f-nome">${esc(f.nome)}</td>
+          <td><select class="entrada g-campo ${f.grupo?'':'sem'}" data-filial-grupo="${esc(f.id)}">
+            <option value="">—</option>
+            ${S.grupos.map(x=>`<option value="${esc(x.nome)}" ${x.nome===f.grupo?'selected':''}>${esc(x.nome)}</option>`).join('')}
+          </select></td>
+        </tr>`).join('') || '<tr><td colspan="2" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
         </tbody></table>
       </div>
     </div>
@@ -1999,17 +2013,25 @@ function ligarFolha(){
   if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
   if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
 
-  /* grupos de valores */
-  document.querySelectorAll('[data-g-salvar]').forEach(x=> x.onclick = async ()=>{
-    const tr = x.closest('tr');
-    const v = campo => tr.querySelector(`[data-g="${campo}"]`).value;
-    const grupo = {id: tr.dataset.novo ? '' : tr.dataset.gId,
-                   nome: v('nome'), vtDiario: v('vtDiario'), vrDiario: v('vrDiario')};
-    if(!grupo.nome.trim()) return toast('Dê um nome ao grupo.', true);
-    carregando(true);
-    try{ await api('salvarGrupo', {grupo}); await recarregar(); toast('Valores salvos.'); }
-    catch(e){ toast(e.message, true); }
-    finally{ carregando(false); }
+  /* grupos de valores: grava ao sair do campo */
+  document.querySelectorAll('[data-g]').forEach(campo=>{
+    campo.dataset.antes = campo.value;
+    campo.onchange = async ()=>{
+      const tr = campo.closest('tr');
+      const v = nome => tr.querySelector(`[data-g="${nome}"]`).value;
+      const grupo = {id: tr.dataset.novo ? '' : tr.dataset.gId,
+                     nome: v('nome').trim(), vtDiario: v('vtDiario'), vrDiario: v('vrDiario')};
+      if(!grupo.nome){
+        if(tr.dataset.novo) return;              /* linha em branco do fim */
+        campo.value = campo.dataset.antes;
+        return toast('O grupo precisa de um nome.', true);
+      }
+      if(campo.dataset.g!=='nome' && campo.value.trim()) campo.value = moeda(valorNum(campo.value));
+      carregando(true);
+      try{ await api('salvarGrupo', {grupo}); await recarregar(); toast('Valores salvos.'); }
+      catch(e){ toast(e.message, true); campo.value = campo.dataset.antes; }
+      finally{ carregando(false); }
+    };
   });
   document.querySelectorAll('[data-g-excluir]').forEach(x=> x.onclick = async ()=>{
     const tr = x.closest('tr');
