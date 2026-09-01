@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01f';
+  const VERSAO_APP = '2026.09.01g';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -345,6 +345,9 @@ table.lista tr:last-child td{border-bottom:none}
 .cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-folha.numero{min-width:58px}
 .cel-folha:focus{background:#fffdf5}
+.cel-com{padding:4px 7px;font-size:13px;width:100%;min-width:78px;
+  font-family:'JetBrains Mono',monospace;text-align:right}
+.cel-com:focus{background:#fffdf5}
 
 /* ---------- TABELAS COMPACTAS DE VALORES ---------- */
 .grade-valores{
@@ -604,9 +607,10 @@ const S = {
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
-  cont:{ competencia:null, linhas:{}, apuracoes:[] },
+  cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[] },
   grupos:[],
-  folha:{ competencia:null, linhas:{}, diasPadrao:'' }
+  folha:{ competencia:null, linhas:{}, diasPadrao:'' },
+  com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' }
 };
 
 const ROTULO_ABA = {
@@ -615,6 +619,7 @@ const ROTULO_ABA = {
   EX_FUNCIONARIOS:'Ex-funcionários',
   PENDENCIAS:'Pendências',
   HORAS_EXTRAS:'Horas extras',
+  COMISSOES:'Comissões',
   CONTABILIDADE:'Contabilidade',
   FOLHA:'Folha de pagamento'
 };
@@ -764,6 +769,7 @@ function aplicarCarga(d){
   S.he.calculos = d.calculos || [];
   S.grupos = d.grupos || [];
   if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
+  if(S.com.competencia && S.com.competencia !== S.competencia) S.com.competencia = null;
   if(S.cont.competencia && S.cont.competencia !== S.competencia) S.cont.competencia = null;
   if(!S.he.calculos.find(c=>c.id===S.he.calculoId)){
     S.he.calculoId = S.he.calculos.length ? S.he.calculos[0].id : '';
@@ -858,11 +864,13 @@ function desenhar(){
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
+  else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
+  if(S.aba==='COMISSOES') ligarComissoes();
   if(S.aba==='CONTABILIDADE') ligarContabilidade();
   if(S.aba==='FOLHA') ligarFolha();
 }
@@ -1761,7 +1769,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','CONTABILIDADE','FOLHA'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','CONTABILIDADE','FOLHA'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -1822,6 +1830,255 @@ async function acao(nome, dados, el, qual, msg){
     toast(msg);
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
+}
+
+/* ==================================================================
+   ABA COMISSÕES
+   Meta diária por funcionário e o registro dos dias em que ela foi
+   batida. O total do mês alimenta a coluna COMISSÕES da contabilidade.
+   ================================================================== */
+function funcionariosDaComissao(){
+  return S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
+}
+function batidasDe(funcId){
+  return S.com.dias.filter(d=>d.funcionarioId===funcId)
+    .sort((a,b)=> String(a.data).localeCompare(String(b.data)));
+}
+function totalBatidas(funcId){
+  return batidasDe(funcId).reduce((s,d)=>s+valorNum(d.valor), 0);
+}
+
+function telaComissoes(){
+  if(S.com.competencia !== S.competencia){
+    carregarComissoes();
+    return `<div class="filial"><div class="vazio">Carregando as comissões de ${compBonita(S.competencia)}…</div></div>`;
+  }
+  const lista = funcionariosDaComissao();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <div style="display:flex;gap:6px;align-items:flex-end">
+      <div><label class="campo-lbl" for="comMeta">Meta diária</label>
+        <input class="entrada mono" id="comMeta" value="${esc(S.com.metaPadrao||'')}"
+               placeholder="0,00" style="width:96px"></div>
+      <button class="btn sec" id="comAplicar">Aplicar a todos</button>
+    </div>
+    <button class="btn sec" id="comExcel">Excel</button>
+    <button class="btn" id="comSalvar">Salvar metas</button>
+  </div>
+  <div class="aviso info">
+    Comissões de <b>${compBonita(S.competencia)}</b>. Defina a meta diária de cada um e,
+    a cada dia batido, clique em <b>Dias batidos</b> para lançar a data e o valor.
+    O total do mês vai direto para a coluna COMISSÕES da aba Contabilidade.
+  </div>`;
+
+  if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
+
+  html += `<div class="painel" style="padding:0"><div class="rolagem">
+    <table class="tab-folha"><thead><tr>
+      <th>Funcionário</th><th>Filial</th><th style="width:120px">Meta diária</th>
+      <th style="width:110px">Dias batidos</th><th style="width:130px">Total do mês</th><th style="width:130px"></th>
+    </tr></thead><tbody>
+    ${lista.map(f=>{
+      const m = S.com.metas[f.id] || {};
+      const qtd = batidasDe(f.id).length;
+      const tot = totalBatidas(f.id);
+      return `<tr>
+        <td class="t-nome">${esc(f.nome)}</td>
+        <td class="t-apagado">${esc(f.filial||'—')}</td>
+        <td><input class="entrada cel-com dinheiro" data-f="${f.id}" data-campo="metaDiaria"
+                   value="${esc(m.metaDiaria||'')}" placeholder="0,00"></td>
+        <td class="mono" style="text-align:right;color:${qtd?'var(--verde)':'var(--apagado)'}">${qtd}</td>
+        <td class="mono t-total">${moeda(tot)}</td>
+        <td style="text-align:right">
+          <button class="btn sec mini" data-batidas="${f.id}">Dias batidos</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody><tfoot><tr>
+      <td><b>TOTAL</b></td><td></td><td></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+batidasDe(f.id).length,0)}</b></td>
+      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+totalBatidas(f.id),0))}</b></td>
+      <td></td>
+    </tr></tfoot></table></div></div>`;
+  return html;
+}
+
+async function carregarComissoes(){
+  carregando(true);
+  try{
+    const d = await api('listarComissoes', {competencia:S.competencia});
+    S.com.metas = {};
+    d.metas.forEach(m=>{ S.com.metas[m.funcionarioId] = m; });
+    S.com.dias = d.dias;
+    S.com.competencia = S.competencia;
+    desenhar();
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function ligarComissoes(){
+  document.querySelectorAll('.cel-com').forEach(c=>{
+    c.oninput = ()=>{
+      const m = S.com.metas[c.dataset.f] || (S.com.metas[c.dataset.f] = {funcionarioId:c.dataset.f});
+      m[c.dataset.campo] = c.value;
+    };
+    c.onblur = ()=>{ if(c.value.trim()){
+      c.value = moeda(valorNum(c.value));
+      S.com.metas[c.dataset.f][c.dataset.campo] = c.value;
+    }};
+  });
+  const b = id => document.getElementById(id);
+  if(b('comMeta')) b('comMeta').oninput = e=>{ S.com.metaPadrao = e.target.value; };
+  if(b('comAplicar')) b('comAplicar').onclick = ()=>{
+    const v = String(S.com.metaPadrao||'').trim();
+    if(!v) return toast('Digite a meta diária antes de aplicar.', true);
+    funcionariosDaComissao().forEach(f=>{
+      const m = S.com.metas[f.id] || (S.com.metas[f.id] = {funcionarioId:f.id});
+      m.metaDiaria = moeda(valorNum(v));
+    });
+    desenhar();
+    toast('Meta aplicada a todos os funcionários da lista.');
+  };
+  if(b('comSalvar')) b('comSalvar').onclick = salvarMetas;
+  if(b('comExcel')) b('comExcel').onclick = exportarComissoesExcel;
+  document.querySelectorAll('[data-batidas]').forEach(x=>
+    x.onclick = ()=>abrirBatidas(x.dataset.batidas));
+}
+
+async function salvarMetas(){
+  const lista = funcionariosDaComissao();
+  const itens = lista.map(f=>({
+    funcionarioId:f.id, nome:f.nome, filial:f.filial,
+    metaDiaria: (S.com.metas[f.id]||{}).metaDiaria || ''
+  })).filter(it=>it.metaDiaria);
+  if(!itens.length) return toast('Nenhuma meta preenchida.', true);
+  carregando(true);
+  try{
+    const r = await api('salvarMetas', {competencia:S.competencia, itens});
+    toast(r.salvos+' metas salvas em '+compBonita(S.competencia)+'.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function abrirBatidas(funcId){
+  const f = S.funcionarios.find(x=>x.id===funcId);
+  const meta = (S.com.metas[funcId]||{}).metaDiaria || '';
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Metas batidas · ${compBonita(S.competencia)}${meta?' · meta diária '+esc(meta):''}</small>
+        <h2>${esc(f.nome)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo" id="batCorpo"></div>`);
+  el._func = f;
+  desenharBatidas(el);
+  return el;
+}
+
+function desenharBatidas(el){
+  const f = el._func;
+  const lista = batidasDe(f.id);
+  const primeiro = S.competencia+'-01';
+  const ultimo = S.competencia+'-'+String(fimDoMes(S.competencia).getDate()).padStart(2,'0');
+
+  el.querySelector('#batCorpo').innerHTML = `
+    <div class="resumo-imp">
+      <div><b style="color:var(--verde)">${lista.length}</b> dias batidos</div>
+      <div><b>${moeda(totalBatidas(f.id))}</b> no mês</div>
+    </div>
+    <div class="barra" style="margin-bottom:14px">
+      <div><label class="campo-lbl" for="batData">Data</label>
+        <input class="entrada" type="date" id="batData" min="${primeiro}" max="${ultimo}" value="${ultimo}"></div>
+      <div><label class="campo-lbl" for="batValor">Valor</label>
+        <input class="entrada mono" id="batValor" placeholder="0,00" style="width:110px"></div>
+      <div style="flex:1;min-width:160px"><label class="campo-lbl" for="batObs">Observação</label>
+        <input class="entrada" id="batObs" placeholder="Opcional"></div>
+      <button class="btn" id="batAdd" style="align-self:flex-end">Lançar</button>
+    </div>
+    ${lista.length ? `<div class="previa"><table><thead><tr>
+      <th style="width:120px">Data</th><th style="width:120px">Valor</th><th>Observação</th>
+      <th style="width:80px">Lançado por</th><th style="width:70px"></th>
+    </tr></thead><tbody>
+    ${lista.map(d=>`<tr>
+      <td class="mono">${dataBonita(d.data)}</td>
+      <td class="mono" style="text-align:right;font-weight:600">${moeda(valorNum(d.valor))}</td>
+      <td style="color:var(--apagado)">${esc(d.observacao||'')}</td>
+      <td style="color:var(--apagado);font-size:12px">${esc(d.lancadoPor||'')}</td>
+      <td style="text-align:right"><button class="link-acao rem" data-bat-excluir="${esc(d.id)}">Excluir</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>`
+    : '<div class="vazio"><b>Nenhum dia lançado</b>Registre acima o primeiro dia em que a meta foi batida.</div>'}`;
+
+  el.querySelector('#batAdd').onclick = async ()=>{
+    const data = el.querySelector('#batData').value;
+    const valor = el.querySelector('#batValor').value.trim();
+    if(!data) return toast('Escolha a data.', true);
+    if(data < primeiro || data > ultimo)
+      return toast('A data precisa estar dentro de '+compBonita(S.competencia)+'.', true);
+    if(batidasDe(f.id).some(d=>d.data===data))
+      return toast('Já existe um lançamento nessa data.', true);
+    carregando(true);
+    try{
+      const batida = {funcionarioId:f.id, data, valor: valor?moeda(valorNum(valor)):'',
+                      observacao: el.querySelector('#batObs').value.trim()};
+      const r = await api('salvarBatida', {competencia:S.competencia, batida});
+      S.com.dias.push(Object.assign({id:r.id, competencia:S.competencia, lancadoPor:S.sessao.usuario}, batida));
+      if(S.cont.competencia===S.competencia) S.cont.competencia = null;
+      desenharBatidas(el); desenhar();
+      toast('Meta de '+dataBonita(data)+' lançada.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  };
+
+  el.querySelectorAll('[data-bat-excluir]').forEach(b=> b.onclick = async ()=>{
+    if(!confirm('Excluir este lançamento?')) return;
+    carregando(true);
+    try{
+      await api('excluirBatida', {id:b.dataset.batExcluir});
+      S.com.dias = S.com.dias.filter(d=>d.id!==b.dataset.batExcluir);
+      if(S.cont.competencia===S.competencia) S.cont.competencia = null;
+      desenharBatidas(el); desenhar();
+      toast('Lançamento excluído.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+}
+
+async function exportarComissoesExcel(){
+  await usar('xlsx');
+  const lista = funcionariosDaComissao();
+  const resumo = [['FUNCIONÁRIO','FILIAL','META DIÁRIA','DIAS BATIDOS','TOTAL DO MÊS']]
+    .concat(lista.map(f=>[f.nome, f.filial, (S.com.metas[f.id]||{}).metaDiaria||'',
+                          batidasDe(f.id).length, moeda(totalBatidas(f.id))]))
+    .concat([['TOTAL','','', lista.reduce((s,f)=>s+batidasDe(f.id).length,0),
+              moeda(lista.reduce((s,f)=>s+totalBatidas(f.id),0))]]);
+  const detalhe = [['FUNCIONÁRIO','FILIAL','DATA','VALOR','OBSERVAÇÃO','LANÇADO POR']];
+  lista.forEach(f=> batidasDe(f.id).forEach(d=>
+    detalhe.push([f.nome, f.filial, dataBonita(d.data), moeda(valorNum(d.valor)),
+                  d.observacao||'', d.lancadoPor||''])));
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(resumo);
+  ws1['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:14},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'RESUMO');
+  const ws2 = XLSX.utils.aoa_to_sheet(detalhe);
+  ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'DIAS BATIDOS');
+  XLSX.writeFile(wb, 'COMISSOES '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
 }
 
 /* ==================================================================
@@ -2200,6 +2457,7 @@ const COLS_CONT = [
   {campo:'adNoturno',  titulo:'AD. NOTURNO',       tipo:'hora',    puxa:true},
   {campo:'faltas',     titulo:'FALTAS',            tipo:'numero',  puxa:true},
   {campo:'atrasos',    titulo:'ATRASOS',           tipo:'hora',    puxa:true},
+  {campo:'comissoes',  titulo:'COMISSÕES',         tipo:'dinheiro',puxa:true},
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
   {campo:'vt',         titulo:'VT',                tipo:'dinheiro'},
@@ -2226,18 +2484,26 @@ function somaHoras(lista){
 function apuracaoDe(f){
   const vivo = S.he.resultados.find(r=>
     (r.funcionarioId && r.funcionarioId===f.id) || normalizar(r.nome)===normalizar(f.nome));
-  if(vivo) return {
+  if(vivo) return Object.assign({
     he50: minParaHora(vivo.ap.he50), he100: minParaHora(vivo.ap.he100),
     adNoturno: minParaHora(vivo.ap.noturno), faltas: String(vivo.ap.diasFalta),
     atrasos: minParaHora(vivo.ap.atrasos), origem:'tela'
-  };
+  }, comissaoDe(f));
   const salva = (S.cont.apuracoes||[]).find(a=>
     (a.funcionarioId && a.funcionarioId===f.id) || normalizar(a.nome)===normalizar(f.nome));
-  if(salva) return {
+  if(salva) return Object.assign({
     he50: salva.he50, he100: salva.he100, adNoturno: salva.adicionalNoturno,
     faltas: '', atrasos: salva.atrasos, origem:'salva'
-  };
-  return null;
+  }, comissaoDe(f));
+  const so = comissaoDe(f);
+  return so ? Object.assign({he50:'',he100:'',adNoturno:'',faltas:'',atrasos:'',origem:'comissao'}, so) : null;
+}
+
+/* total das metas batidas no mês, vindo da aba Comissões */
+function comissaoDe(f){
+  const dias = (S.cont.comissoes||[]).filter(d=>d.funcionarioId===f.id);
+  if(!dias.length) return null;
+  return {comissoes: moeda(dias.reduce((s,d)=>s+valorNum(d.valor),0))};
 }
 
 function linhasContabilidade(){
@@ -2322,6 +2588,7 @@ async function carregarContabilidade(){
     S.cont.linhas = {};
     d.linhas.forEach(l=>{ S.cont.linhas[l.funcionarioId] = l; });
     S.cont.apuracoes = d.apuracoes;
+    S.cont.comissoes = d.comissoes || [];
     S.cont.competencia = S.competencia;
     desenhar();
   }catch(e){ toast(e.message, true); }
