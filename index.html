@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01j';
+  const VERSAO_APP = '2026.09.01l';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -342,12 +342,35 @@ table.lista tr:last-child td{border-bottom:none}
 .tab-folha .t-nome{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 .tab-folha .t-apagado{color:var(--apagado)}
 .tab-folha .t-total{text-align:right;font-weight:600;background:#fafcfb}
+.tab-folha tr.cab-filial td{
+  background:#eef1f5;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  font-weight:700;color:var(--grafite);padding:7px 9px;
+  border-top:1px solid var(--linha-forte);border-bottom:1px solid var(--linha);
+}
+.tab-folha tr.cab-filial td span{
+  font-weight:400;letter-spacing:0;text-transform:none;color:var(--apagado);margin-left:8px;
+}
+.tab-folha tr.cab-filial td.mono{text-align:right;letter-spacing:0;font-size:12px}
+.tab-folha tbody tr.cab-filial:hover{background:#eef1f5}
 .tab-folha tfoot td{background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px;text-align:right}
 .tab-folha tfoot td:first-child{text-align:left}
 .cel-folha{padding:4px 7px;font-size:13px;width:100%;min-width:78px}
 .cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-folha.numero{min-width:58px}
 .cel-folha:focus{background:#fffdf5}
+.grade-quebra{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end;
+  padding:14px;background:#f6f7f9;border:1px solid var(--linha);border-radius:3px;
+}
+.grade-quebra .qb-larga{grid-column:span 3}
+.qb-total{
+  padding:9px 11px;border:1px solid var(--linha);border-radius:2px;background:#fff;
+  text-align:right;font-weight:700;
+}
+@media(max-width:820px){
+  .grade-quebra{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grade-quebra .qb-larga{grid-column:span 2}
+}
 .cel-com{padding:4px 7px;font-size:13px;width:100%;min-width:78px;
   font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-com:focus{background:#fffdf5}
@@ -641,10 +664,11 @@ const S = {
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, pendAberta:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
-  cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[] },
+  cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
-  com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' }
+  com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
+  qb:{ competencia:null, itens:[] }
 };
 
 const ROTULO_ABA = {
@@ -654,6 +678,7 @@ const ROTULO_ABA = {
   PENDENCIAS:'Pendências',
   HORAS_EXTRAS:'Horas extras',
   COMISSOES:'Comissões',
+  QUEBRAS:'Quebras',
   CONTABILIDADE:'Contabilidade',
   FOLHA:'Folha de pagamento'
 };
@@ -804,6 +829,7 @@ function aplicarCarga(d){
   S.grupos = d.grupos || [];
   if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
   if(S.com.competencia && S.com.competencia !== S.competencia) S.com.competencia = null;
+  if(S.qb.competencia && S.qb.competencia !== S.competencia) S.qb.competencia = null;
   if(S.cont.competencia && S.cont.competencia !== S.competencia) S.cont.competencia = null;
   if(!S.he.calculos.find(c=>c.id===S.he.calculoId)){
     S.he.calculoId = S.he.calculos.length ? S.he.calculos[0].id : '';
@@ -899,12 +925,14 @@ function desenhar(){
   else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
+  else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
   else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='COMISSOES') ligarComissoes();
+  if(S.aba==='QUEBRAS') ligarQuebras();
   if(S.aba==='CONTABILIDADE') ligarContabilidade();
   if(S.aba==='FOLHA') ligarFolha();
 }
@@ -1857,7 +1885,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','CONTABILIDADE','FOLHA'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','CONTABILIDADE','FOLHA'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -2166,6 +2194,252 @@ async function exportarComissoesExcel(){
   ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}];
   XLSX.utils.book_append_sheet(wb, ws2, 'DIAS BATIDOS');
   XLSX.writeFile(wb, 'COMISSOES '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
+}
+
+/* ==================================================================
+   ABA QUEBRAS
+   Lançamento das mercadorias quebradas por funcionário. O total do mês
+   alimenta a coluna QUEBRA DE PRODUTOS da contabilidade.
+   ================================================================== */
+function funcionariosDaQuebra(){
+  return S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
+}
+function quebrasDe(funcId){
+  return S.qb.itens.filter(q=>q.funcionarioId===funcId)
+    .sort((a,b)=> String(a.data).localeCompare(String(b.data)));
+}
+function totalQuebras(funcId){
+  return quebrasDe(funcId).reduce((s,q)=>s+valorNum(q.custoTotal), 0);
+}
+
+function telaQuebras(){
+  if(S.qb.competencia !== S.competencia){
+    carregarQuebras();
+    return `<div class="filial"><div class="vazio">Carregando as quebras de ${compBonita(S.competencia)}…</div></div>`;
+  }
+  const lista = funcionariosDaQuebra();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+  const comQuebra = lista.filter(f=>quebrasDe(f.id).length).length;
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <button class="btn sec" id="qbExcel">Excel</button>
+  </div>
+  <div class="aviso info">
+    Quebras de <b>${compBonita(S.competencia)}</b> · ${comQuebra} de ${lista.length} funcionários com lançamento.
+    Clique em <b>Lançar</b> para registrar o produto quebrado. O total de cada um vai
+    direto para a coluna QUEBRA DE PRODUTOS da aba Contabilidade.
+  </div>`;
+
+  if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
+
+  html += `<div class="painel" style="padding:0"><div class="rolagem">
+    <table class="tab-folha"><thead><tr>
+      <th>Funcionário</th><th>Filial</th><th style="width:110px">Lançamentos</th>
+      <th style="width:120px">Peças</th><th style="width:140px">Total do mês</th><th style="width:110px"></th>
+    </tr></thead><tbody>
+    ${(()=>{
+      let filialAtual = null;
+      return lista.map(f=>{
+        let cab = '';
+        if(f.filial !== filialAtual){
+          filialAtual = f.filial;
+          const daFilial = lista.filter(x=>x.filial===filialAtual);
+          const totalFilial = daFilial.reduce((s,x)=>s+totalQuebras(x.id),0);
+          cab = `<tr class="cab-filial"><td colspan="4">${esc(filialAtual||'SEM FILIAL')}
+            <span>${daFilial.length} ${daFilial.length===1?'funcionário':'funcionários'}</span></td>
+            <td class="mono">${totalFilial?moeda(totalFilial):''}</td><td></td></tr>`;
+        }
+        const q = quebrasDe(f.id);
+        const pecas = q.reduce((s,x)=>s+valorNum(x.quantidade),0);
+        return cab + `<tr>
+          <td class="t-nome">${esc(f.nome)}</td>
+          <td class="t-apagado">${esc(f.filial||'—')}</td>
+          <td class="mono" style="text-align:right;color:${q.length?'var(--vermelho)':'var(--apagado)'}">${q.length}</td>
+          <td class="mono" style="text-align:right;color:var(--apagado)">${pecas||''}</td>
+          <td class="mono t-total">${moeda(totalQuebras(f.id))}</td>
+          <td style="text-align:right"><button class="btn sec mini" data-quebra="${f.id}">Lançar</button></td>
+        </tr>`;
+      }).join('');
+    })()}
+    </tbody><tfoot><tr>
+      <td><b>TOTAL</b></td><td></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+quebrasDe(f.id).length,0)}</b></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+quebrasDe(f.id).reduce((a,x)=>a+valorNum(x.quantidade),0),0)}</b></td>
+      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+totalQuebras(f.id),0))}</b></td>
+      <td></td>
+    </tr></tfoot></table></div></div>`;
+  return html;
+}
+
+async function carregarQuebras(){
+  carregando(true);
+  try{
+    S.qb.itens = await api('listarQuebras', {competencia:S.competencia});
+    S.qb.competencia = S.competencia;
+    desenhar();
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+function ligarQuebras(){
+  const b = id => document.getElementById(id);
+  if(b('qbExcel')) b('qbExcel').onclick = exportarQuebrasExcel;
+  document.querySelectorAll('[data-quebra]').forEach(x=>
+    x.onclick = ()=>abrirQuebras(x.dataset.quebra));
+}
+
+function abrirQuebras(funcId){
+  const f = S.funcionarios.find(x=>x.id===funcId);
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Quebras de mercadoria · ${compBonita(S.competencia)}</small><h2>${esc(f.nome)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo" id="qbCorpo"></div>`, true);
+  el._func = f;
+  desenharQuebras(el);
+  return el;
+}
+
+function desenharQuebras(el){
+  const f = el._func;
+  const lista = quebrasDe(f.id);
+  const primeiro = S.competencia+'-01';
+  const ultimo = S.competencia+'-'+String(fimDoMes(S.competencia).getDate()).padStart(2,'0');
+
+  el.querySelector('#qbCorpo').innerHTML = `
+    <div class="resumo-imp">
+      <div><b>${lista.length}</b> lançamentos</div>
+      <div><b>${lista.reduce((s,q)=>s+valorNum(q.quantidade),0)}</b> peças</div>
+      <div><b style="color:var(--vermelho)">${moeda(totalQuebras(f.id))}</b> no mês</div>
+    </div>
+
+    <div class="grade-quebra">
+      <div><label class="campo-lbl" for="qbData">Data</label>
+        <input class="entrada" type="date" id="qbData" min="${primeiro}" max="${ultimo}" value="${ultimo}"></div>
+      <div><label class="campo-lbl" for="qbCodigo">Código do produto</label>
+        <input class="entrada mono" id="qbCodigo" placeholder="SKU"></div>
+      <div><label class="campo-lbl" for="qbUnit">Custo unitário</label>
+        <input class="entrada mono" id="qbUnit" placeholder="0,00" style="text-align:right"></div>
+      <div><label class="campo-lbl" for="qbQtd">Quantidade</label>
+        <input class="entrada mono" type="number" min="1" step="1" id="qbQtd" value="1" style="text-align:right"></div>
+      <div><label class="campo-lbl">Custo total</label>
+        <div class="mono qb-total" id="qbTotal">0,00</div></div>
+      <div><label class="campo-lbl" for="qbForn">Fornecedor</label>
+        <input class="entrada" id="qbForn" placeholder="Opcional"></div>
+      <div class="qb-larga"><label class="campo-lbl" for="qbObs">Observação</label>
+        <input class="entrada" id="qbObs" placeholder="Como aconteceu, nº da nota, etc."></div>
+      <div><label class="campo-lbl">&nbsp;</label>
+        <button class="btn" id="qbAdd" style="width:100%">Lançar</button></div>
+    </div>
+
+    ${lista.length ? `<div class="previa" style="margin-top:16px"><table><thead><tr>
+      <th style="width:100px">Data</th><th style="width:110px">Código</th>
+      <th style="width:100px">Unitário</th><th style="width:60px">Qtd</th>
+      <th style="width:110px">Total</th><th>Fornecedor</th><th>Observação</th><th style="width:70px"></th>
+    </tr></thead><tbody>
+    ${lista.map(q=>`<tr>
+      <td class="mono">${dataBonita(q.data)}</td>
+      <td class="mono">${esc(q.codigo||'—')}</td>
+      <td class="mono" style="text-align:right">${moeda(valorNum(q.custoUnitario))}</td>
+      <td class="mono" style="text-align:right">${esc(q.quantidade||'')}</td>
+      <td class="mono" style="text-align:right;font-weight:600">${moeda(valorNum(q.custoTotal))}</td>
+      <td style="color:var(--apagado)">${esc(q.fornecedor||'')}</td>
+      <td style="color:var(--apagado)">${esc(q.observacao||'')}</td>
+      <td style="text-align:right"><button class="link-acao rem" data-qb-excluir="${esc(q.id)}">Excluir</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>`
+    : '<div class="vazio" style="margin-top:12px"><b>Nenhuma quebra lançada</b>Registre acima o primeiro produto.</div>'}`;
+
+  const q = x => el.querySelector(x);
+  const recalcular = ()=>{
+    q('#qbTotal').textContent = moeda(valorNum(q('#qbUnit').value) * valorNum(q('#qbQtd').value));
+  };
+  q('#qbUnit').oninput = recalcular;
+  q('#qbQtd').oninput = recalcular;
+  q('#qbUnit').onblur = ()=>{ if(q('#qbUnit').value.trim()){
+    q('#qbUnit').value = moeda(valorNum(q('#qbUnit').value)); recalcular();
+  }};
+  recalcular();
+
+  q('#qbAdd').onclick = async ()=>{
+    const codigo = q('#qbCodigo').value.trim();
+    const unit = q('#qbUnit').value.trim();
+    const qtd = q('#qbQtd').value.trim();
+    if(!codigo) return toast('Informe o código do produto.', true);
+    if(!valorNum(unit)) return toast('Informe o custo unitário.', true);
+    if(!valorNum(qtd)) return toast('Informe a quantidade.', true);
+    carregando(true);
+    try{
+      const quebra = {
+        funcionarioId: f.id, data: q('#qbData').value, codigo,
+        custoUnitario: moeda(valorNum(unit)), quantidade: qtd,
+        custoTotal: moeda(valorNum(unit) * valorNum(qtd)),
+        fornecedor: q('#qbForn').value.trim(), observacao: q('#qbObs').value.trim()
+      };
+      const r = await api('salvarQuebra', {competencia:S.competencia, quebra});
+      S.qb.itens.push(Object.assign({id:r.id, competencia:S.competencia,
+        lancadoPor:S.sessao.usuario}, quebra));
+      if(S.cont.competencia===S.competencia) S.cont.competencia = null;
+      desenharQuebras(el); desenhar();
+      toast('Quebra de '+codigo+' lançada.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  };
+
+  el.querySelectorAll('[data-qb-excluir]').forEach(b=> b.onclick = async ()=>{
+    if(!confirm('Excluir este lançamento?')) return;
+    carregando(true);
+    try{
+      await api('excluirQuebra', {id:b.dataset.qbExcluir});
+      S.qb.itens = S.qb.itens.filter(x=>x.id!==b.dataset.qbExcluir);
+      if(S.cont.competencia===S.competencia) S.cont.competencia = null;
+      desenharQuebras(el); desenhar();
+      toast('Lançamento excluído.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+}
+
+async function exportarQuebrasExcel(){
+  await usar('xlsx');
+  const lista = funcionariosDaQuebra();
+  const resumo = [['FUNCIONÁRIO','FILIAL','LANÇAMENTOS','PEÇAS','TOTAL DO MÊS']]
+    .concat(lista.map(f=>[f.nome, f.filial, quebrasDe(f.id).length,
+      quebrasDe(f.id).reduce((s,q)=>s+valorNum(q.quantidade),0), moeda(totalQuebras(f.id))]))
+    .concat([['TOTAL','', lista.reduce((s,f)=>s+quebrasDe(f.id).length,0),
+      lista.reduce((s,f)=>s+quebrasDe(f.id).reduce((a,q)=>a+valorNum(q.quantidade),0),0),
+      moeda(lista.reduce((s,f)=>s+totalQuebras(f.id),0))]]);
+
+  const det = [['FUNCIONÁRIO','FILIAL','DATA','CÓDIGO','CUSTO UNITÁRIO','QUANTIDADE',
+                'CUSTO TOTAL','FORNECEDOR','OBSERVAÇÃO','LANÇADO POR']];
+  lista.forEach(f=> quebrasDe(f.id).forEach(q=> det.push([
+    f.nome, f.filial, dataBonita(q.data), q.codigo||'', moeda(valorNum(q.custoUnitario)),
+    q.quantidade||'', moeda(valorNum(q.custoTotal)), q.fornecedor||'', q.observacao||'', q.lancadoPor||''
+  ])));
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(resumo);
+  ws1['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'RESUMO');
+  const ws2 = XLSX.utils.aoa_to_sheet(det);
+  ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:14},{wch:12},{wch:14},{wch:20},{wch:34},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'LANÇAMENTOS');
+  XLSX.writeFile(wb, 'QUEBRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -2636,7 +2910,7 @@ const COLS_CONT = [
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
   {campo:'vt',         titulo:'VT',                tipo:'dinheiro'},
-  {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro'},
+  {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro',puxa:true},
   {campo:'premiacao',  titulo:'PREMIAÇÃO',         tipo:'dinheiro'}
 ];
 
@@ -2671,14 +2945,18 @@ function apuracaoDe(f){
     faltas: '', atrasos: salva.atrasos, origem:'salva'
   }, comissaoDe(f));
   const so = comissaoDe(f);
-  return so ? Object.assign({he50:'',he100:'',adNoturno:'',faltas:'',atrasos:'',origem:'comissao'}, so) : null;
+  return so ? Object.assign({he50:'',he100:'',adNoturno:'',faltas:'',atrasos:'',origem:'outras'}, so) : null;
 }
 
-/* total das metas batidas no mês, vindo da aba Comissões */
+/* totais que vêm de outras abas: metas batidas e quebras de mercadoria */
 function comissaoDe(f){
   const dias = (S.cont.comissoes||[]).filter(d=>d.funcionarioId===f.id);
-  if(!dias.length) return null;
-  return {comissoes: moeda(dias.reduce((s,d)=>s+valorNum(d.valor),0))};
+  const quebras = (S.cont.quebras||[]).filter(q=>q.funcionarioId===f.id);
+  if(!dias.length && !quebras.length) return null;
+  const r = {};
+  if(dias.length) r.comissoes = moeda(dias.reduce((s,d)=>s+valorNum(d.valor),0));
+  if(quebras.length) r.quebra = moeda(quebras.reduce((s,q)=>s+valorNum(q.custoTotal),0));
+  return r;
 }
 
 function linhasContabilidade(){
@@ -2713,8 +2991,9 @@ function telaContabilidade(){
   </div>
   <div class="aviso info">
     Fechamento de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
-    As colunas de horas extras, adicional noturno, faltas e atrasos são preenchidas pela aba
-    Horas extras quando há apuração; as demais são digitadas. Tudo pode ser corrigido à mão.
+    As colunas em verde são preenchidas por outras abas — horas extras, adicional noturno,
+    faltas e atrasos vêm de Horas extras; comissões vêm de Comissões; quebra de produtos
+    vem de Quebras. As demais são digitadas. Tudo pode ser corrigido à mão.
   </div>`;
 
   if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
@@ -2764,6 +3043,7 @@ async function carregarContabilidade(){
     d.linhas.forEach(l=>{ S.cont.linhas[l.funcionarioId] = l; });
     S.cont.apuracoes = d.apuracoes;
     S.cont.comissoes = d.comissoes || [];
+    S.cont.quebras = d.quebras || [];
     S.cont.competencia = S.competencia;
     desenhar();
   }catch(e){ toast(e.message, true); }
@@ -3423,46 +3703,62 @@ function limparCampo(t){
   return String(t||'').split(/\s+(?:PIS|Mat|CPF|Cargo|CEI|CNPJ|Data Admiss)\w*\s*:/)[0].trim();
 }
 
+/* Percorre o PDF linha a linha, não página a página: assim um único arquivo
+   pode trazer vários funcionários, inclusive dois no mesmo pedaço de página,
+   e o relatório de um mesmo funcionário pode ocupar várias páginas. */
 function extrairCartoes(paginas, nomeArquivo){
+  const linhas = [];
+  paginas.forEach(p=> p.forEach(l=> linhas.push(l)));
+
+  const reDia = new RegExp('^(\\d{2}\\/\\d{2}\\/\\d{4})\\s+('+DIAS_SEM+')\\s+(.+)$');
   const cartoes = [];
+  const porChave = {};
   let atual = null;
-  paginas.forEach(linhas=>{
-    const texto = linhas.join('\n');
-    const mNome = texto.match(/Nome:\s*(.+)/);
+
+  linhas.forEach((linha, i)=>{
+    const mNome = linha.match(/Nome:\s*(.+)/);
     if(mNome){
-      const nome = limparCampo(mNome[1]).toUpperCase();
-      if(!atual || atual.nome !== nome){
-        const mCargo = texto.match(/Cargo:\s*(.+)/);
-        const mPer = texto.match(/Periodo:\s*(\d{2}\/\d{2}\/\d{4})[\s\S]{0,10}?(\d{2}\/\d{2}\/\d{4})/);
-        atual = {
-          nome, arquivo: nomeArquivo,
-          cargo: mCargo ? limparCampo(mCargo[1]) : '',
-          periodoIni: mPer ? mPer[1] : '', periodoFim: mPer ? mPer[2] : '',
-          dias: []
-        };
-        cartoes.push(atual);
-      }
+      const nome = limparCampo(mNome[1]).toUpperCase().replace(/\s+/g,' ').trim();
+      if(!nome) return;
+      /* Cargo e período vêm logo depois do nome. Procurar para trás pegaria os
+         dados do funcionário anterior quando dois cabeçalhos estão na mesma página. */
+      const adiante = linhas.slice(i, i+16).join('\n');
+      const atras = linhas.slice(Math.max(0, i-10), i).join('\n');
+      const achar = re => adiante.match(re) || atras.match(re);
+      const mPer = achar(/Periodo:\s*(\d{2}\/\d{2}\/\d{4})[\s\S]{0,12}?(\d{2}\/\d{2}\/\d{4})/);
+      const chave = nome + '|' + (mPer ? mPer[1] : '');
+      if(porChave[chave]){ atual = porChave[chave]; return; }   /* continuação */
+      const mCargo = achar(/Cargo:\s*(.+)/);
+      atual = {
+        nome, arquivo: nomeArquivo,
+        cargo: mCargo ? limparCampo(mCargo[1]) : '',
+        periodoIni: mPer ? mPer[1] : '', periodoFim: mPer ? mPer[2] : '',
+        dias: []
+      };
+      porChave[chave] = atual;
+      cartoes.push(atual);
+      return;
     }
+
     if(!atual) return;
-    const re = new RegExp('^(\\d{2}\\/\\d{2}\\/\\d{4})\\s+('+DIAS_SEM+')\\s+(.+)$');
-    linhas.forEach(l=>{
-      const m = l.match(re);
-      if(!m) return;
-      const resto = m[3];
-      const tempos = resto.match(/\d{1,2}:\d{2}/g);
-      if(!tempos || tempos.length < 4) return;
-      const defin = resto.slice(0, resto.indexOf(tempos[0])).trim();
-      const marcas = tempos.slice(0, tempos.length-4).map(horaParaMin);
-      const fim = tempos.slice(-4).map(horaParaMin);
-      if(atual.dias.some(d=>d.data===m[1])) return;   /* página repetida */
-      atual.dias.push({
-        data:m[1], semana:m[2], definicao:defin, marcas,
-        ch:fim[0], relDiurno:fim[1], relNoturno:fim[2], relSaldo:fim[3]
-      });
+    const m = linha.match(reDia);
+    if(!m) return;
+    const resto = m[3];
+    const tempos = resto.match(/\d{1,2}:\d{2}/g);
+    if(!tempos || tempos.length < 4) return;
+    if(atual.dias.some(d=>d.data===m[1])) return;   /* cabeçalho repetido */
+    const marcas = tempos.slice(0, tempos.length-4).map(horaParaMin);
+    const fim = tempos.slice(-4).map(horaParaMin);
+    atual.dias.push({
+      data: m[1], semana: m[2],
+      definicao: resto.slice(0, resto.indexOf(tempos[0])).trim(),
+      marcas, ch: fim[0], relDiurno: fim[1], relNoturno: fim[2], relSaldo: fim[3]
     });
   });
+
   return cartoes.filter(c=>c.dias.length);
 }
+
 
 /* ---------- cálculos cadastrados ---------- */
 const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaDomingo:'06:00',
@@ -3839,7 +4135,8 @@ function telaHorasExtras(){
   <div class="solta" id="heSolta" style="margin-bottom:18px">
     <b>Importar cartões ponto</b>
     <small>Serão apurados pelo cálculo <b>${esc(c.nome)}</b> — dá para trocar depois, cartão a cartão.<br>
-    PDF é lido automaticamente. Foto (JPG ou PNG) abre a grade de digitação.</small>
+    PDF é lido automaticamente, e um mesmo arquivo pode trazer vários funcionários.
+    Foto (JPG ou PNG) abre a grade de digitação.</small>
   </div>
 
   ${S.he.resultados.length ? tabelaHoras() : vazio('Nenhum cartão importado',
@@ -3962,12 +4259,14 @@ async function importarCartoes(todos){
   if(!arquivos.length) return filaDeFotos(imagens);
   carregando(true);
   const erros = [];
+  let lidos = 0;
   try{
     for(const arq of arquivos){
       try{
         const paginas = await linhasDoPdf(await arq.arrayBuffer());
         const cartoes = extrairCartoes(paginas, arq.name);
         if(!cartoes.length){ erros.push(arq.name+': não encontrei linhas de marcação.'); continue; }
+        lidos += cartoes.length;
         cartoes.forEach(cart=>{
           const f = S.funcionarios.find(x=>normalizar(x.nome)===normalizar(cart.nome));
           const anterior = S.he.resultados.findIndex(r=>normalizar(r.nome)===normalizar(cart.nome));
@@ -3984,7 +4283,8 @@ async function importarCartoes(todos){
     }
     S.he.resultados.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
     desenhar();
-    toast(S.he.resultados.length+' cartão(ões) apurado(s).');
+    toast(lidos===1 ? '1 cartão apurado.'
+          : lidos+' cartões apurados de '+arquivos.length+' arquivo(s).');
     if(erros.length){ console.warn(erros); toast(erros[0], true); }
   }finally{ carregando(false); }
   if(imagens.length) filaDeFotos(imagens);
