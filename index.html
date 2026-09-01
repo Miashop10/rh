@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01g';
+  const VERSAO_APP = '2026.09.01h';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -297,6 +297,9 @@ table.lista tr:last-child td{border-bottom:none}
 
 /* ---------- LISTA COMPACTA DE FUNCIONÁRIOS ---------- */
 .rolagem{overflow-x:auto}
+/* rola na horizontal e na vertical: é o que permite congelar o cabeçalho */
+.rolagem-alta{overflow:auto;max-height:calc(100vh - 250px);min-height:260px}
+.espaco-filial td{height:12px;padding:0;border:none;background:var(--papel)}
 .tab-func{width:100%;border-collapse:collapse;font-size:13px;min-width:1080px}
 .tab-func th{
   position:sticky;top:0;background:#f6f7f9;text-align:left;padding:7px 10px;
@@ -348,6 +351,9 @@ table.lista tr:last-child td{border-bottom:none}
 .cel-com{padding:4px 7px;font-size:13px;width:100%;min-width:78px;
   font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-com:focus{background:#fffdf5}
+.cel-vale{padding:4px 6px;font-size:12px;width:100%;min-width:70px}
+.cel-vale.nao{color:var(--vermelho);font-weight:600}
+.cel-folha:disabled{background:#f4f5f7;color:#b7bec7}
 
 /* ---------- TABELAS COMPACTAS DE VALORES ---------- */
 .grade-valores{
@@ -428,7 +434,10 @@ select.g-campo.sem{color:var(--ambar)}
 }
 .pill.opcional{background:#eef1f4;color:var(--grafite);border-color:var(--linha)}
 .p-neutro{background:#c8ccd3}
+.colunas-tipos{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px;align-items:start}
+@media(max-width:820px){.colunas-tipos{grid-template-columns:1fr}}
 .linha-tipo{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.linha-tipo .entrada{max-width:none}
 .linha-tipo .entrada{flex:1;max-width:340px}
 @media(max-width:820px){
   .linha-anexo{grid-template-columns:4px 1fr auto;padding-right:12px}
@@ -463,6 +472,19 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
 .resumo-imp b{display:block;font-family:'JetBrains Mono',monospace;font-size:20px;color:var(--tinta)}
 
 /* ---------- PENDÊNCIAS ---------- */
+.linha-pend{cursor:pointer}
+.linha-pend:hover td{background:#fafbfc}
+.linha-pend.aberta td{background:#f2f5f9;font-weight:600}
+.seta{color:var(--apagado);font-size:10px;margin-right:2px}
+.detalhe-pend td{background:#f8f9fb;padding:0 !important}
+.cx-pend{padding:12px 14px 14px}
+.linha-pend-func{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;
+  border-bottom:1px solid #e9ecf0;font-size:13px;text-align:left;
+}
+.linha-pend-func:last-child{border-bottom:none}
+.pend-falta{color:var(--vermelho);font-size:12px}
+.pend-conferir{color:var(--ambar);font-size:12px}
 .painel{background:var(--cartao);border:1px solid var(--linha);border-radius:3px;padding:18px;overflow-x:auto}
 .matriz{border-collapse:collapse;width:100%;font-size:13px;min-width:640px}
 .matriz th{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--apagado);font-weight:600;padding:9px;text-align:center;border-bottom:1px solid var(--linha)}
@@ -604,7 +626,7 @@ const S = {
   config:{diaLimite:'10', tiposObrigatorios:['HOLERITE','VALE','VR','VT','CARTAO PONTO'],
           tiposOpcionais:[]},
   competencia: hojeCompetencia(),
-  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null,
+  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, pendAberta:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[] },
@@ -922,13 +944,19 @@ function telaFuncionarios(){
   if(!ativos.length) return html + vazio('Nenhum funcionário encontrado',
     'Cadastre o primeiro funcionário ou ajuste a busca.');
 
-  html += `<div class="painel" style="padding:0"><div class="rolagem">
+  let filialAnterior = null;
+  const corpo = ativos.map(f=>{
+    const espaco = (filialAnterior !== null && f.filial !== filialAnterior)
+      ? '<tr class="espaco-filial"><td colspan="10"></td></tr>' : '';
+    filialAnterior = f.filial;
+    return espaco + linhaFuncionario(f);
+  }).join('');
+
+  html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
     <table class="tab-func"><thead><tr>
       <th>Filial</th><th>Funcionário</th><th>Cargo</th><th>Início</th><th>Admissão</th>
       <th>Dados bancários</th><th>Situação</th><th colspan="2"></th><th>Observações</th>
-    </tr></thead><tbody>
-    ${ativos.map(f=>linhaFuncionario(f)).join('')}
-    </tbody></table></div></div>`;
+    </tr></thead><tbody>${corpo}</tbody></table></div></div>`;
   return html;
 }
 
@@ -1011,11 +1039,14 @@ function telaEx(){
 function telaPendencias(){
   const ativos = S.funcionarios.filter(f=>f.status!=='DEMITIDO');
   const tipos = S.config.tiposObrigatorios;
-  const filiais = [...new Set(ativos.map(f=>f.filial))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
-  let html = `<div class="aviso info">Faltas por filial na competência <b>${compBonita(S.competencia)}</b> · prazo até <b>${dataBonita(prazoDaCompetencia())}</b></div>`;
+  const filiais = [...new Set(ativos.map(f=>f.filial))].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
+  let html = `<div class="aviso info">Faltas por filial na competência <b>${compBonita(S.competencia)}</b> ·
+    prazo até <b>${dataBonita(prazoDaCompetencia())}</b> · clique numa filial para ver quem está devendo</div>`;
   if(!filiais.length) return html + vazio('Sem dados','Cadastre funcionários para acompanhar as pendências.');
+
   html += `<div class="painel"><table class="matriz"><thead><tr>
     <th>Filial</th>${tipos.map(t=>`<th>${esc(t)}</th>`).join('')}<th>A conferir</th></tr></thead><tbody>`;
+
   filiais.forEach(fil=>{
     const lista = ativos.filter(f=>f.filial===fil);
     const cels = tipos.map(t=>{
@@ -1023,10 +1054,43 @@ function telaPendencias(){
       return `<td class="${falta?'cel-falta':'cel-ok'}">${falta? falta+' falta'+(falta>1?'m':''):'ok'}</td>`;
     }).join('');
     const conferir = lista.filter(f=>situacao(f)==='ambar').length;
-    html += `<tr><td>${esc(fil)} <span style="color:var(--apagado);font-weight:400">(${lista.length})</span></td>${cels}<td class="${conferir?'cel-falta':'cel-ok'}">${conferir||'ok'}</td></tr>`;
+    const aberta = S.pendAberta === fil;
+    html += `<tr class="linha-pend ${aberta?'aberta':''}" data-pend="${esc(fil)}">
+      <td><span class="seta">${aberta?'▾':'▸'}</span> ${esc(fil)}
+        <span style="color:var(--apagado);font-weight:400">(${lista.length})</span></td>
+      ${cels}<td class="${conferir?'cel-falta':'cel-ok'}">${conferir||'ok'}</td></tr>`;
+
+    if(aberta) html += detalhePendencia(fil, lista, tipos);
   });
   html += '</tbody></table></div>';
   return html;
+}
+
+function detalhePendencia(fil, lista, tipos){
+  const devendo = lista.map(f=>{
+    const meus = docsDe(f.id, S.competencia);
+    const faltam = tipos.filter(t=>!meus.find(d=>d.tipo===t));
+    const conferir = meus.filter(d=>tipos.includes(d.tipo) && d.status!=='APROVADO');
+    return {f, faltam, conferir};
+  }).filter(x=> x.faltam.length || x.conferir.length)
+    .sort((a,b)=> b.faltam.length - a.faltam.length || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+
+  if(!devendo.length){
+    return `<tr class="detalhe-pend"><td colspan="${tipos.length+2}">
+      <div class="cx-pend" style="color:var(--verde)">Tudo anexado e conferido em ${esc(fil)}.</div></td></tr>`;
+  }
+
+  return `<tr class="detalhe-pend"><td colspan="${tipos.length+2}">
+    <div class="cx-pend">
+      ${devendo.map(x=>`
+      <div class="linha-pend-func">
+        <span class="bolinha p-${situacao(x.f)}"></span>
+        <b>${esc(x.f.nome)}</b>
+        ${x.faltam.length ? `<span class="pend-falta">falta ${x.faltam.map(esc).join(', ')}</span>` : ''}
+        ${x.conferir.length ? `<span class="pend-conferir">a conferir ${x.conferir.map(d=>esc(d.tipo)).join(', ')}</span>` : ''}
+        <button class="btn sec mini" data-docs="${x.f.id}" style="margin-left:auto">Documentos</button>
+      </div>`).join('')}
+    </div></td></tr>`;
 }
 
 function vazio(t,s){ return `<div class="filial"><div class="vazio"><b>${esc(t)}</b>${esc(s)}</div></div>`; }
@@ -1048,7 +1112,13 @@ function ligarEventos(){
   if(novo) novo.onclick = ()=>abrirFuncionario(null);
   const imp = document.getElementById('btnImportar');
   if(imp) imp.onclick = abrirImportacao;
-  document.querySelectorAll('[data-docs]').forEach(b=> b.onclick = ()=>abrirDocumentos(b.dataset.docs));
+  document.querySelectorAll('[data-docs]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation(); abrirDocumentos(b.dataset.docs);
+  });
+  document.querySelectorAll('[data-pend]').forEach(tr=> tr.onclick = ()=>{
+    S.pendAberta = S.pendAberta===tr.dataset.pend ? null : tr.dataset.pend;
+    desenhar();
+  });
   document.querySelectorAll('[data-editar]').forEach(b=> b.onclick = ()=>abrirFuncionario(b.dataset.editar));
 }
 
@@ -1076,7 +1146,7 @@ function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
                      status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:'',
-                     tipoConta:'CORRENTE'},
+                     tipoConta:'CORRENTE', recebeVale:'SIM'},
                     (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
@@ -1126,6 +1196,11 @@ function abrirFuncionario(id, extra){
             </select>
           </div>
         </div>
+        <div><label class="campo-lbl" for="fVale">Recebe vale mensal</label>
+          <select class="entrada" id="fVale">
+            <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
+            <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
+          </select></div>
         <div class="full" id="boxCnpj"></div>
         <div class="full"><label class="campo-lbl" for="fObs">Observações</label>
           <textarea class="entrada" id="fObs" placeholder="Anotações internas do RH">${esc(f.observacoes)}</textarea></div>
@@ -1163,6 +1238,7 @@ function abrirFuncionario(id, extra){
       agencia: el.querySelector('#fAgencia').value.trim(),
       conta: el.querySelector('#fConta').value.trim(),
       tipoConta: el.querySelector('#fTipoConta').value,
+      recebeVale: el.querySelector('#fVale').value,
       status: st.value,
       dataDemissao: st.value==='DEMITIDO' ? el.querySelector('#fDem').value : '',
       observacoes: el.querySelector('#fObs').value
@@ -2156,7 +2232,7 @@ function telaFolha(){
     html += `<div class="painel" style="padding:0"><div class="rolagem">
       <table class="tab-folha"><thead><tr>
         <th>Funcionário</th><th>Filial</th><th>VT/dia</th><th>Dias</th><th>Total VT</th>
-        <th>VR/dia</th><th>Total VR</th><th>Vale mensal</th><th>Observações</th>
+        <th>VR/dia</th><th>Total VR</th><th>Vale mensal</th><th style="width:104px">Quer vale?</th><th>Observações</th>
       </tr></thead><tbody>
       ${lista.map(f=>{
         const d = linhaFolhaDe(f);
@@ -2172,7 +2248,11 @@ function telaFolha(){
                      value="${esc(d.vrDiario)}"></td>
           <td class="mono t-total">${moeda(d.totalVr)}</td>
           <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vale"
-                     value="${esc(d.vale)}"></td>
+                     value="${esc(d.vale)}" ${f.recebeVale==='NAO'?'disabled':''}></td>
+          <td><select class="entrada cel-vale ${f.recebeVale==='NAO'?'nao':''}" data-vale="${f.id}">
+            <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
+            <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
+          </select></td>
           <td><input class="entrada cel-folha" data-f="${f.id}" data-campo="observacoes"
                      value="${esc(d.observacoes)}" placeholder="Anotação"></td>
         </tr>`;
@@ -2183,7 +2263,10 @@ function telaFolha(){
         <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
         <td></td>
         <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
-        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).vale),0))}</b></td>
+        <td class="mono"><b>${moeda(lista.reduce((s,f)=>
+          s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
+        <td class="mono" style="text-align:center;color:var(--apagado)">${
+          lista.filter(f=>f.recebeVale==='NAO').length} sem</td>
         <td></td>
       </tr></tfoot></table></div></div>`;
   }else{
@@ -2285,6 +2368,24 @@ function ligarFolha(){
     desenhar();
     toast(d+' dias aplicados a todos os funcionários da lista.');
   };
+  document.querySelectorAll('[data-vale]').forEach(sel=> sel.onchange = async ()=>{
+    const f = S.funcionarios.find(x=>x.id===sel.dataset.vale);
+    carregando(true);
+    try{
+      await api('definirRecebeVale', {funcionarioId:f.id, recebe:sel.value});
+      f.recebeVale = sel.value;
+      if(sel.value==='NAO'){
+        const l = S.folha.linhas[f.id];
+        if(l) l.vale = '';
+      }
+      desenhar();
+      toast(f.nome+(sel.value==='NAO'
+        ? ' não recebe vale — vale para os próximos meses também.'
+        : ' volta a receber vale.'));
+    }catch(e){ toast(e.message, true); sel.value = f.recebeVale||'SIM'; }
+    finally{ carregando(false); }
+  });
+
   if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolha;
   if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
   if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
@@ -2355,7 +2456,8 @@ async function salvarFolha(){
     return {
       funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
       vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
-      vrDiario:d.vrDiario, totalVr:moeda(d.totalVr), vale:d.vale, observacoes:d.observacoes
+      vrDiario:d.vrDiario, totalVr:moeda(d.totalVr),
+      vale: f.recebeVale==='NAO' ? 'NÃO RECEBE' : d.vale, observacoes:d.observacoes
     };
   }).filter(it=> it.dias || it.vale || it.observacoes);
   if(!itens.length) return toast('Preencha ao menos os dias de alguém antes de salvar.', true);
@@ -2369,16 +2471,18 @@ async function salvarFolha(){
 
 function tabelaFolha(){
   const lista = funcionariosDaFolha();
-  const cab = ['FUNCIONÁRIO','FILIAL','GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR','VALE MENSAL','OBSERVAÇÕES'];
+  const cab = ['FUNCIONÁRIO','FILIAL','GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR','VALE MENSAL','QUER VALE','OBSERVAÇÕES'];
   const linhas = lista.map(f=>{
     const d = linhaFolhaDe(f);
     return [f.nome, f.filial, d.grupo, d.vtDiario, d.dias, moeda(d.totalVt),
-            d.vrDiario, moeda(d.totalVr), d.vale, d.observacoes];
+            d.vrDiario, moeda(d.totalVr),
+            f.recebeVale==='NAO' ? '' : d.vale,
+            f.recebeVale==='NAO' ? 'NÃO' : 'SIM', d.observacoes];
   });
   const total = ['TOTAL','','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0)),
-    moeda(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).vale),0)), ''];
+    moeda(lista.reduce((s,f)=> s + (f.recebeVale==='NAO'?0:valorNum(linhaFolhaDe(f).vale)),0)), '', ''];
   return {cab, linhas, total};
 }
 
@@ -2386,7 +2490,7 @@ async function exportarFolhaExcel(){
   await usar('xlsx');
   const {cab, linhas, total} = tabelaFolha();
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:18},{wch:24},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},{wch:14},{wch:30}];
+  ws['!cols'] = [{wch:36},{wch:18},{wch:24},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},{wch:14},{wch:11},{wch:30}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
@@ -2821,17 +2925,22 @@ function painelTipos(){
       </div>
     </div>
     <div style="padding:16px">
-      <div class="titulo-grupo" style="margin-top:0">Obrigatórios todo mês
-        <small>faltou um, o nome fica vermelho</small></div>
-      <div id="listaOb">${S.tiposEdit.ob.map((t,i)=>linha(t,i,'ob')).join('')}</div>
-      <button class="btn sec mini" id="obAdicionar" style="margin-top:6px">+ Adicionar obrigatório</button>
-
-      <div class="titulo-grupo">Opcionais
-        <small>anexe quando houver · não afetam a cor do nome</small></div>
-      <div id="listaOp">${S.tiposEdit.op.map((t,i)=>linha(t,i,'op')).join('')}
-        ${S.tiposEdit.op.length?'':'<div class="prazo" style="font-size:13px;color:var(--apagado);margin-bottom:8px">Nenhum documento opcional cadastrado.</div>'}
+      <div class="colunas-tipos">
+        <div>
+          <div class="titulo-grupo" style="margin-top:0">Obrigatórios todo mês
+            <small>faltou um, o nome fica vermelho</small></div>
+          <div id="listaOb">${S.tiposEdit.ob.map((t,i)=>linha(t,i,'ob')).join('')}</div>
+          <button class="btn sec mini" id="obAdicionar" style="margin-top:6px">+ Adicionar obrigatório</button>
+        </div>
+        <div>
+          <div class="titulo-grupo" style="margin-top:0">Opcionais
+            <small>não afetam a cor do nome</small></div>
+          <div id="listaOp">${S.tiposEdit.op.map((t,i)=>linha(t,i,'op')).join('')}
+            ${S.tiposEdit.op.length?'':'<div class="prazo" style="font-size:13px;color:var(--apagado);margin-bottom:8px">Nenhum documento opcional cadastrado.</div>'}
+          </div>
+          <button class="btn sec mini" id="opAdicionar" style="margin-top:6px">+ Adicionar opcional</button>
+        </div>
       </div>
-      <button class="btn sec mini" id="opAdicionar" style="margin-top:6px">+ Adicionar opcional</button>
 
       <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
         <button class="btn" id="tipoSalvar">Salvar listas</button>
