@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01h';
+  const VERSAO_APP = '2026.09.01j';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -374,6 +374,18 @@ table.lista tr:last-child td{border-bottom:none}
 .g-campo:focus{border-color:var(--tinta);background:#fffdf5}
 .g-campo.mono{text-align:right}
 select.g-campo.sem{color:var(--ambar)}
+.cel-valor{display:flex;align-items:center;gap:4px}
+.cel-valor .g-campo{flex:1;min-width:0}
+.tipo-valor{
+  font-size:9px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;
+  padding:3px 5px;border-radius:2px;background:#eef1f4;color:var(--apagado);flex:none;
+}
+.tipo-valor:hover{background:#e2e6ec;color:var(--tinta)}
+.tipo-valor.mes{background:var(--tinta);color:#fff}
+.marca-mes{
+  font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;
+  color:var(--apagado);margin-left:4px;
+}
 .g-x{color:#c2c8d0;font-size:13px;line-height:1;padding:2px 4px;border-radius:2px}
 .g-x:hover{color:var(--vermelho);background:var(--vermelho-suave)}
 @media(max-width:820px){.grade-valores{grid-template-columns:1fr}}
@@ -631,7 +643,7 @@ const S = {
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[] },
   grupos:[],
-  folha:{ competencia:null, linhas:{}, diasPadrao:'' },
+  folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' }
 };
 
@@ -2174,11 +2186,15 @@ function linhaFolhaDe(f){
   const vt = l.vtDiario !== undefined && l.vtDiario !== '' ? l.vtDiario : (g ? g.vtDiario : '');
   const vr = l.vrDiario !== undefined && l.vrDiario !== '' ? l.vrDiario : (g ? g.vrDiario : '');
   const dias = l.dias || '';
+  /* grupo com valor fechado do mês não multiplica pelos dias */
+  const vtMes = !!(g && g.vtTipo === 'MES');
+  const vrMes = !!(g && g.vrTipo === 'MES');
   return {
-    grupo: g ? g.nome : '', vtDiario: vt, vrDiario: vr, dias,
+    grupo: g ? g.nome : '', tipoLoja: g ? (g.tipoLoja||'RUA') : '',
+    vtDiario: vt, vrDiario: vr, dias, vtMes, vrMes,
     vale: l.vale || '', observacoes: l.observacoes || '',
-    totalVt: valorNum(vt) * valorNum(dias),
-    totalVr: valorNum(vr) * valorNum(dias)
+    totalVt: vtMes ? valorNum(vt) : valorNum(vt) * valorNum(dias),
+    totalVr: vrMes ? valorNum(vr) : valorNum(vr) * valorNum(dias)
   };
 }
 
@@ -2210,10 +2226,13 @@ function telaFolha(){
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     <div style="display:flex;gap:6px;align-items:flex-end">
-      <div><label class="campo-lbl" for="folhaDias">Dias</label>
-        <input class="entrada mono" type="number" min="0" max="31" id="folhaDias"
-               value="${esc(S.folha.diasPadrao||'')}" style="width:76px"></div>
-      <button class="btn sec" id="folhaAplicar">Aplicar a todos</button>
+      <div><label class="campo-lbl" for="diasRua">Dias rua</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="diasRua"
+               value="${esc(S.folha.diasRua||'')}" style="width:72px"></div>
+      <div><label class="campo-lbl" for="diasShop">Dias shopping</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="diasShop"
+               value="${esc(S.folha.diasShop||'')}" style="width:72px"></div>
+      <button class="btn sec" id="folhaAplicar">Preencher dias</button>
     </div>
     <button class="btn sec" id="folhaExcel">Excel</button>
     <button class="btn sec" id="folhaPdf">PDF</button>
@@ -2231,8 +2250,8 @@ function telaFolha(){
   if(lista.length){
     html += `<div class="painel" style="padding:0"><div class="rolagem">
       <table class="tab-folha"><thead><tr>
-        <th>Funcionário</th><th>Filial</th><th>VT/dia</th><th>Dias</th><th>Total VT</th>
-        <th>VR/dia</th><th>Total VR</th><th>Vale mensal</th><th style="width:104px">Quer vale?</th><th>Observações</th>
+        <th>Funcionário</th><th>Filial</th><th>VT</th><th>Dias</th><th>Total VT</th>
+        <th>VR</th><th>Total VR</th><th>Vale mensal</th><th style="width:104px">Quer vale?</th><th>Observações</th>
       </tr></thead><tbody>
       ${lista.map(f=>{
         const d = linhaFolhaDe(f);
@@ -2240,12 +2259,14 @@ function telaFolha(){
           <td class="t-nome">${esc(f.nome)}</td>
           <td class="t-apagado" title="${esc(d.grupo||'sem grupo')}">${esc(f.filial||'—')}</td>
           <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vtDiario"
-                     value="${esc(d.vtDiario)}"></td>
+                     value="${esc(d.vtDiario)}" title="${d.vtMes?'valor fechado do mês':'valor por dia'}">
+              ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
           <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
                      value="${esc(d.dias)}"></td>
           <td class="mono t-total">${moeda(d.totalVt)}</td>
           <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vrDiario"
-                     value="${esc(d.vrDiario)}"></td>
+                     value="${esc(d.vrDiario)}" title="${d.vrMes?'valor fechado do mês':'valor por dia'}">
+              ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
           <td class="mono t-total">${moeda(d.totalVr)}</td>
           <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vale"
                      value="${esc(d.vale)}" ${f.recebeVale==='NAO'?'disabled':''}></td>
@@ -2285,10 +2306,21 @@ function painelGrupos(){
     <tr data-g-id="${esc(g.id||'')}" ${novo?'data-novo="1"':''}>
       <td><input class="entrada g-campo" data-g="nome" value="${esc(g.nome||'')}"
                  placeholder="${novo?'+ novo grupo':''}"></td>
-      <td><input class="entrada g-campo mono" data-g="vtDiario" value="${esc(g.vtDiario||'')}"
-                 placeholder="0,00"></td>
-      <td><input class="entrada g-campo mono" data-g="vrDiario" value="${esc(g.vrDiario||'')}"
-                 placeholder="0,00"></td>
+      <td class="cel-valor">
+        <input class="entrada g-campo mono" data-g="vtDiario" value="${esc(g.vtDiario||'')}" placeholder="0,00">
+        <button class="tipo-valor ${g.vtTipo==='MES'?'mes':''}" data-tipo="vtTipo"
+                title="${g.vtTipo==='MES'?'Valor fechado do mês — clique para voltar a por dia':'Valor por dia — clique para virar valor fechado do mês'}"
+                >${g.vtTipo==='MES'?'mês':'dia'}</button></td>
+      <td class="cel-valor">
+        <input class="entrada g-campo mono" data-g="vrDiario" value="${esc(g.vrDiario||'')}" placeholder="0,00">
+        <button class="tipo-valor ${g.vrTipo==='MES'?'mes':''}" data-tipo="vrTipo"
+                title="${g.vrTipo==='MES'?'Valor fechado do mês — clique para voltar a por dia':'Valor por dia — clique para virar valor fechado do mês'}"
+                >${g.vrTipo==='MES'?'mês':'dia'}</button></td>
+      <td><select class="entrada g-campo" data-g="tipoLoja">
+        <option value="RUA" ${(g.tipoLoja||'RUA')==='RUA'?'selected':''}>Rua</option>
+        <option value="SHOPPING" ${g.tipoLoja==='SHOPPING'?'selected':''}>Shopping</option>
+        <option value="OUTRO" ${g.tipoLoja==='OUTRO'?'selected':''}>Outro</option>
+      </select></td>
       <td class="g-uso">${novo?'':(qtd[g.nome]||0)}</td>
       <td>${novo?'':`<button class="g-x" data-g-excluir="1" title="Excluir grupo">✕</button>`}</td>
     </tr>`;
@@ -2305,8 +2337,9 @@ function painelGrupos(){
       <div>
         <div class="titulo-grupo" style="margin-top:0">Por grupo</div>
         <table class="mini-tab"><thead><tr>
-          <th>Grupo</th><th style="width:74px">VT/dia</th><th style="width:74px">VR/dia</th>
-          <th style="width:34px" title="Filiais no grupo">Fil.</th><th style="width:26px"></th>
+          <th>Grupo</th><th style="width:104px">VT</th><th style="width:104px">VR</th>
+          <th style="width:86px">Tipo</th>
+          <th style="width:32px" title="Filiais no grupo">Fil.</th><th style="width:24px"></th>
         </tr></thead><tbody>
         ${S.grupos.map(g=>linhaGrupo(g)).join('')}
         ${linhaGrupo({}, true)}
@@ -2357,16 +2390,25 @@ function ligarFolha(){
   });
 
   const b = id => document.getElementById(id);
-  if(b('folhaDias')) b('folhaDias').oninput = e=>{ S.folha.diasPadrao = e.target.value; };
+  if(b('diasRua')) b('diasRua').oninput = e=>{ S.folha.diasRua = e.target.value; };
+  if(b('diasShop')) b('diasShop').oninput = e=>{ S.folha.diasShop = e.target.value; };
   if(b('folhaAplicar')) b('folhaAplicar').onclick = ()=>{
-    const d = String(S.folha.diasPadrao||'').trim();
-    if(!d) return toast('Digite a quantidade de dias antes de aplicar.', true);
+    const rua = String(S.folha.diasRua||'').trim();
+    const shop = String(S.folha.diasShop||'').trim();
+    if(!rua && !shop) return toast('Digite os dias de rua e/ou de shopping.', true);
+    let n = 0;
     funcionariosDaFolha().forEach(f=>{
+      const tipo = linhaFolhaDe(f).tipoLoja;
+      const d = tipo==='SHOPPING' ? shop : tipo==='RUA' ? rua : '';
+      if(!d) return;
       const l = S.folha.linhas[f.id] || (S.folha.linhas[f.id] = {funcionarioId:f.id});
       l.dias = d;
+      n++;
     });
     desenhar();
-    toast(d+' dias aplicados a todos os funcionários da lista.');
+    toast(n ? n+' funcionários preenchidos ('+(rua?rua+' na rua':'')+
+              (rua&&shop?', ':'')+(shop?shop+' em shopping':'')+').'
+            : 'Nenhuma filial da lista está marcada como rua ou shopping.', !n);
   };
   document.querySelectorAll('[data-vale]').forEach(sel=> sel.onchange = async ()=>{
     const f = S.funcionarios.find(x=>x.id===sel.dataset.vale);
@@ -2395,9 +2437,17 @@ function ligarFolha(){
     campo.dataset.antes = campo.value;
     campo.onchange = async ()=>{
       const tr = campo.closest('tr');
-      const v = nome => tr.querySelector(`[data-g="${nome}"]`).value;
+      const v = nome => {
+        const el = tr.querySelector(`[data-g="${nome}"]`);
+        return el ? el.value : '';
+      };
+      const bt = campo => {
+        const el = tr.querySelector(`[data-tipo="${campo}"]`);
+        return el && el.classList.contains('mes') ? 'MES' : 'DIA';
+      };
       const grupo = {id: tr.dataset.novo ? '' : tr.dataset.gId,
-                     nome: v('nome').trim(), vtDiario: v('vtDiario'), vrDiario: v('vrDiario')};
+                     nome: v('nome').trim(), vtDiario: v('vtDiario'), vrDiario: v('vrDiario'),
+                     vtTipo: bt('vtTipo'), vrTipo: bt('vrTipo'), tipoLoja: v('tipoLoja') || 'RUA'};
       if(!grupo.nome){
         if(tr.dataset.novo) return;              /* linha em branco do fim */
         campo.value = campo.dataset.antes;
@@ -2410,6 +2460,27 @@ function ligarFolha(){
       finally{ carregando(false); }
     };
   });
+  document.querySelectorAll('[data-tipo]').forEach(bt=> bt.onclick = async ()=>{
+    const tr = bt.closest('tr');
+    bt.classList.toggle('mes');
+    bt.textContent = bt.classList.contains('mes') ? 'mês' : 'dia';
+    if(tr.dataset.novo) return;
+    const v = nome => { const el = tr.querySelector(`[data-g="${nome}"]`); return el?el.value:''; };
+    const est = campo => {
+      const el = tr.querySelector(`[data-tipo="${campo}"]`);
+      return el && el.classList.contains('mes') ? 'MES' : 'DIA';
+    };
+    carregando(true);
+    try{
+      await api('salvarGrupo', {grupo:{id:tr.dataset.gId, nome:v('nome').trim(),
+        vtDiario:v('vtDiario'), vrDiario:v('vrDiario'),
+        vtTipo:est('vtTipo'), vrTipo:est('vrTipo'), tipoLoja:v('tipoLoja')||'RUA'}});
+      await recarregar();
+      toast(bt.dataset.tipo==='vtTipo'?'VT':'VR', false);
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+
   document.querySelectorAll('[data-g-excluir]').forEach(x=> x.onclick = async ()=>{
     const tr = x.closest('tr');
     if(!confirm('Excluir o grupo '+tr.querySelector('[data-g="nome"]').value+'?')) return;
@@ -3395,14 +3466,15 @@ function extrairCartoes(paginas, nomeArquivo){
 
 /* ---------- cálculos cadastrados ---------- */
 const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaDomingo:'06:00',
-  tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA'};
+  tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA', domingoExtra:'100'};
 
 function calculoPor(id){
   return S.he.calculos.find(c=>c.id===id) || S.he.calculos[0] || CALCULO_PADRAO;
 }
 function calculoAtual(){ return calculoPor(S.he.calculoId); }
 function resumoCalculo(c){
-  return c.jornada+' · dom '+c.jornadaDomingo+' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
+  return c.jornada+' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
+         ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
          ' · tol. '+c.tolerancia+' min'+(c.base==='CH'?' · base CH':'');
 }
 
@@ -3443,10 +3515,16 @@ function apurar(cartao, cfg){
     const noturno = intervalos.reduce((s,[a,b])=>s+minutosNoturnos(a,b,notIni,notFim),0);
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
-    const cem = d.ch === 0 || d.definicao.toUpperCase() !== 'DIA NORMAL';
+    const def = String(d.definicao||'').toUpperCase();
     const domingo = String(d.semana||'').toLowerCase().indexOf('dom') === 0;
-    const base = cfg.base === 'CH' ? d.ch : (domingo ? jornadaDom : jornadaFixa);
-    const extra = cem ? trabalhado : Math.max(0, trabalhado - base);
+    /* Domingo é dia útil com jornada própria: só o que passa dela é extra.
+       Um domingo que também seja feriado precisa da marcação 100% na edição. */
+    const feriado = def === 'FERIADO' || (!domingo && (d.ch === 0 || def !== 'DIA NORMAL'));
+    const cem = feriado || (domingo && cfg.domingoExtra !== '50');
+    const base = feriado ? 0
+      : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
+      : (cfg.base === 'CH' ? d.ch : jornadaFixa);
+    const extra = Math.max(0, trabalhado - base);
 
     /* os minutos extras são os últimos do dia: é ali que cai o adicional noturno */
     let resto = extra, extraNot = 0;
@@ -3461,12 +3539,13 @@ function apurar(cartao, cfg){
     else   { r.he50d  += extraDiu; r.he50n  += extraNot; }
 
     let atraso = 0;
-    if(!cem){
+    if(base > 0){
       const falta = base - trabalhado;
       if(falta > tol){ atraso = falta; r.atrasos += falta; r.diasAtraso++; }
     }
     r.detalhe.push(Object.assign({}, d, {
-      tipo: cem ? '100%' : 'NORMAL', trabalhado, extra, extraNot, atraso
+      tipo: feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
+      trabalhado, extra, extraNot, atraso
     }));
   });
 
@@ -4146,6 +4225,10 @@ function linhaCalculo(c, novo){
       <option value="FIXA" ${c.base!=='CH'?'selected':''}>Jornadas fixas</option>
       <option value="CH" ${c.base==='CH'?'selected':''}>CH do cartão</option>
     </select></td>
+    <td><select class="entrada" data-c="domingoExtra">
+      <option value="100" ${c.domingoExtra!=='50'?'selected':''}>100%</option>
+      <option value="50" ${c.domingoExtra==='50'?'selected':''}>50%</option>
+    </select></td>
     <td style="text-align:right;white-space:nowrap">
       <button class="link-acao" data-c-salvar="1">${novo?'Criar':'Salvar'}</button>
       ${novo?'':'<button class="link-acao rem" data-c-excluir="1">Excluir</button>'}
@@ -4158,6 +4241,9 @@ function desenharCalculos(el){
 
   el.querySelector('#calcCorpo').innerHTML = `
     <div class="aviso info">
+      Domingo é dia útil com a jornada própria: só o que passa dela vira extra, no
+      percentual da coluna <b>Extra domingo</b>. Domingo que também for feriado precisa
+      da marcação <b>100%</b> na tela de edição do cartão.<br>
       Cada cartão ponto pode ter a sua jornada. Cadastre aqui os cálculos e escolha
       qual usar na hora de importar — ou troque depois, cartão a cartão, na coluna
       <b>Cálculo</b> da tabela.
@@ -4165,7 +4251,7 @@ function desenharCalculos(el){
     <div class="previa" style="max-height:none">
       <table><thead><tr>
         <th>Nome</th><th>Seg a sáb</th><th>Domingo</th><th>Noturno de</th><th>até</th>
-        <th>Tolerância</th><th>Base</th><th></th>
+        <th>Tolerância</th><th>Base</th><th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
       ${linhaCalculo({}, true)}
@@ -4184,7 +4270,7 @@ function desenharCalculos(el){
       id: tr.dataset.novo ? '' : tr.dataset.calcId,
       nome: v('nome'), jornada: v('jornada'), jornadaDomingo: v('jornadaDomingo'),
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
-      tolerancia: v('tolerancia'), base: v('base')
+      tolerancia: v('tolerancia'), base: v('base'), domingoExtra: v('domingoExtra')
     };
     if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
     carregando(true);
