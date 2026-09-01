@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01d';
+  const VERSAO_APP = '2026.09.01f';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -199,6 +199,7 @@ select.campo,input.campo{
 }
 .selo.emp{background:#eef1f4;color:var(--grafite)}
 .selo.dem{background:#f4e6e5;color:var(--vermelho)}
+.selo.alerta{background:var(--vermelho);color:#fff}
 .cel{font-size:13px;color:var(--grafite)}
 .acoes{display:flex;gap:6px;justify-content:flex-end}
 .vazio{padding:44px 20px;text-align:center;color:var(--apagado)}
@@ -238,21 +239,23 @@ textarea.entrada{min-height:70px;resize:vertical}
 }
 .docs-cabecalho .prazo{font-size:12px;color:var(--apagado)}
 .docs-cabecalho .prazo b{color:var(--tinta)}
-.grade-docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+.colunas-docs{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:18px 22px;align-items:start}
+.grade-docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px}
+@media(max-width:900px){.colunas-docs{grid-template-columns:1fr}}
 .card-doc{border:1px solid var(--linha);border-radius:3px;overflow:hidden;background:#fff;display:flex;flex-direction:column}
 .card-doc.falta{border-style:dashed;border-color:var(--linha-forte)}
-.card-doc-topo{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--linha)}
-.card-doc-tipo{font-size:11px;font-weight:700;letter-spacing:.1em}
+.card-doc-topo{display:flex;align-items:center;gap:6px;padding:6px 9px;border-bottom:1px solid var(--linha)}
+.card-doc-tipo{font-size:10.5px;font-weight:700;letter-spacing:.08em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ponto{width:7px;height:7px;border-radius:50%;flex:none}
 .p-vermelho{background:var(--vermelho)} .p-ambar{background:var(--ambar)} .p-verde{background:var(--verde)}
 .miniatura{
-  height:116px;background:#f4f6f8;display:grid;place-items:center;cursor:pointer;overflow:hidden;position:relative;
+  height:96px;background:#f4f6f8;display:grid;place-items:center;cursor:pointer;overflow:hidden;position:relative;
 }
 .miniatura img{width:100%;height:100%;object-fit:cover}
 .miniatura .pdf-marca{font-size:11px;letter-spacing:.14em;color:var(--apagado);font-weight:700}
 .miniatura.sem{cursor:default;color:#b7bec7;font-size:12px}
-.card-doc-pe{display:flex;gap:5px;padding:8px;border-top:1px solid #eef0f3;flex-wrap:wrap}
-.link-acao{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--grafite);padding:4px 6px;border-radius:2px}
+.card-doc-pe{display:flex;gap:3px;padding:6px;border-top:1px solid #eef0f3;flex-wrap:wrap}
+.link-acao{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--grafite);padding:3px 5px;border-radius:2px}
 .link-acao:hover{background:#f0f2f5}
 .link-acao.rem{color:var(--vermelho)}
 .link-acao.apr{color:var(--verde)}
@@ -807,6 +810,17 @@ function situacao(f){
   return achados.every(d=>d.status==='APROVADO') ? 'verde' : 'ambar';
 }
 
+const SITUACOES = {
+  EMPREGADO:{rotulo:'Empregado', classe:'emp'},
+  AVISO:    {rotulo:'Aviso prévio', classe:'alerta'},
+  FERIAS:   {rotulo:'Férias', classe:'alerta'},
+  DEMITIDO: {rotulo:'Demitido', classe:'dem'}
+};
+function selo(status){
+  const s = SITUACOES[status] || SITUACOES.EMPREGADO;
+  return `<span class="selo ${s.classe}">${s.rotulo}</span>`;
+}
+
 function podeAprovar(){
   return S.sessao && (S.sessao.papel==='MASTER' || S.sessao.papel==='GERENTE_RH');
 }
@@ -937,7 +951,7 @@ function linhaFuncionario(f){
     <td class="mono t-apagado">${dataBonita(f.dataInicio)}</td>
     <td class="mono">${dataBonita(f.dataAdmissao)}</td>
     <td class="t-banco mono" title="${esc(dica)}">${bancoResumido(f)}</td>
-    <td><span class="selo ${f.status==='DEMITIDO'?'dem':'emp'}">${f.status==='DEMITIDO'?'Demitido':'Empregado'}</span></td>
+    <td>${selo(f.status)}</td>
     <td><button class="btn sec mini" data-docs="${f.id}">Documentos</button></td>
     <td><button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -974,7 +988,7 @@ function telaEx(){
         <div class="nome c-neutro">${esc(f.nome)}<small>Admissão ${dataBonita(f.dataAdmissao)} · Demissão ${dataBonita(f.dataDemissao)}</small></div>
         <div class="cel esconde-mob">${esc(f.filial)}</div>
         <div class="cel mono esconde-mob">${dataBonita(f.dataDemissao)}</div>
-        <div class="esconde-mob"><span class="selo dem">Demitido</span></div>
+        <div class="esconde-mob">${selo('DEMITIDO')}</div>
         <div class="acoes">
           <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
           <button class="btn sec mini" data-editar="${f.id}">Editar</button>
@@ -1076,10 +1090,10 @@ function abrirFuncionario(id, extra){
           <input class="entrada" type="date" id="fAdm" value="${esc(f.dataAdmissao)}"></div>
         <div><label class="campo-lbl" for="fIni">Início</label>
           <input class="entrada" type="date" id="fIni" value="${esc(f.dataInicio||'')}"></div>
-        <div><label class="campo-lbl" for="fStatus">Status</label>
+        <div><label class="campo-lbl" for="fStatus">Situação</label>
           <select class="entrada" id="fStatus">
-            <option value="EMPREGADO" ${f.status!=='DEMITIDO'?'selected':''}>Empregado</option>
-            <option value="DEMITIDO" ${f.status==='DEMITIDO'?'selected':''}>Demitido</option>
+            ${Object.keys(SITUACOES).map(k=>
+              `<option value="${k}" ${f.status===k?'selected':''}>${SITUACOES[k].rotulo}</option>`).join('')}
           </select></div>
         <div id="boxDem" style="display:${f.status==='DEMITIDO'?'block':'none'}">
           <label class="campo-lbl" for="fDem">Data de demissão</label>
@@ -1157,7 +1171,9 @@ function abrirFuncionario(id, extra){
       el.remove();
       await recarregar();
       if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
-      toast(dados.status==='DEMITIDO' ? 'Funcionário movido para Ex-funcionários.' : 'Cadastro salvo.');
+      toast(dados.status==='DEMITIDO' ? 'Funcionário movido para Ex-funcionários.'
+            : dados.status==='EMPREGADO' ? 'Cadastro salvo.'
+            : 'Situação alterada para '+SITUACOES[dados.status].rotulo+'. Continua na aba Funcionários.');
     }catch(e){ toast(e.message,true); }
     finally{ carregando(false); }
   };
@@ -1246,15 +1262,18 @@ function desenharDocs(el){
         Filial <b>${esc(f.filial)}</b> · Admissão <b>${dataBonita(f.dataAdmissao)}</b></div>
       <div style="margin-left:auto" class="prazo">Troque o mês no topo da tela para anexar outra competência.</div>
     </div>
-    <div class="titulo-grupo">Obrigatórios do mês</div>
+    <div class="colunas-docs">
+    <div>
+    <div class="titulo-grupo" style="margin-top:0">Obrigatórios do mês</div>
     <div class="grade-docs">`;
 
   tipos.forEach(t=>{
     html += cardDoc(t, doMes.find(d=>d.tipo===t), f);
   });
-  html += `</div>`;
+  html += `</div></div>`;
 
-  html += `<div class="titulo-grupo">Opcionais<small>não entram na cor do nome</small></div>
+  html += `<div>
+    <div class="titulo-grupo" style="margin-top:0">Opcionais<small>fora da cor do nome</small></div>
     <div class="grade-docs">`;
   opcionais.forEach(t=>{
     html += cardDoc(t, doMes.find(d=>d.tipo===t), f, true);
@@ -1266,7 +1285,7 @@ function desenharDocs(el){
         <div class="miniatura sem">Documento avulso</div>
         <div class="card-doc-pe"><button class="link-acao" id="addOutro">+ Adicionar</button></div>
       </div>
-    </div>`;
+    </div></div></div>`;
 
   if(outros.length){
     html += `<div class="hist-comp"><div class="hist-titulo">Outras competências</div>`;
@@ -2649,6 +2668,14 @@ function normalizar(t){
 }
 function doisDig(n){ return String(n).padStart(2,'0'); }
 
+function statusDaPlanilha(v){
+  const t = String(v||'').toUpperCase();
+  if(t.includes('DEMIT')) return 'DEMITIDO';
+  if(t.includes('AVISO')) return 'AVISO';
+  if(t.includes('FERI') || t.includes('FÉRI')) return 'FERIAS';
+  return 'EMPREGADO';
+}
+
 function lerData(v){
   if(v===''||v==null) return '';
   if(typeof v==='number' && isFinite(v)){
@@ -2682,9 +2709,10 @@ function abrirImportacao(){
 function passoArquivo(el){
   el.querySelector('#impCorpo').innerHTML = `
     <div class="aviso info">
-      Colunas reconhecidas: <b>NOME</b>, <b>CARGO</b>, <b>FILIAL</b>, <b>AGÊNCIA</b>,
-      <b>CONTA</b>, <b>BANCO</b>, <b>CPF</b>, <b>INÍCIO</b>, <b>ADMISSÃO</b>, <b>SITUAÇÃO</b>,
-      além de <b>TIPO CONTA</b> e <b>OBSERVAÇÕES</b>.
+      Colunas reconhecidas: <b>NOME</b>, <b>STATUS</b>, <b>FUNÇÃO</b>, <b>AGÊNCIA</b>,
+      <b>CONTA</b>, <b>BANCO</b>, <b>CPF</b>, <b>FILIAL</b>, <b>INÍCIO</b>, <b>ADMISSÃO</b>
+      e <b>OBSERVAÇÕES</b>, além de <b>TIPO CONTA</b>.
+      STATUS aceita empregado, aviso prévio, férias ou demitido.
       A ordem não importa e colunas extras são ignoradas. Aceita .xlsx, .xls e .csv.
       Só NOME e FILIAL são obrigatórios. Baixe o modelo abaixo se quiser o formato pronto.
     </div>
@@ -2712,13 +2740,13 @@ function passoArquivo(el){
 async function baixarModelo(){
   await usar('xlsx');
   const dados = [
-    ['NOME','CARGO','FILIAL','AGÊNCIA','CONTA','BANCO','CPF','INÍCIO','ADMISSÃO','SITUAÇÃO','TIPO CONTA','OBSERVAÇÕES'],
-    ['MARIA APARECIDA DA SILVA','VENDEDORA','CENTRO','1234','56789-0','ITAÚ','000.000.000-00','15/01/2024','03/02/2024','EMPREGADO','CORRENTE','Banco de horas em acordo'],
-    ['JOÃO PEDRO SOUZA','ESTOQUISTA','BATEL','0001','11122-3','CAIXA','','','15/08/2023','EMPREGADO','POUPANÇA',''],
-    ['ANA CLARA MARTINS','CAIXA','CENTRO','','','','','','10/01/2022','DEMITIDO','','Pediu demissão']
+    ['NOME','STATUS','FUNÇÃO','AGÊNCIA','CONTA','BANCO','CPF','FILIAL','INÍCIO','ADMISSÃO','TIPO CONTA','OBSERVAÇÕES'],
+    ['MARIA APARECIDA DA SILVA','EMPREGADO','VENDEDORA','1234','56789-0','ITAÚ','000.000.000-00','CENTRO','15/01/2024','03/02/2024','CORRENTE','Banco de horas em acordo'],
+    ['JOÃO PEDRO SOUZA','FÉRIAS','ESTOQUISTA','0001','11122-3','CAIXA','','BATEL','','15/08/2023','POUPANÇA',''],
+    ['ANA CLARA MARTINS','DEMITIDO','CAIXA','','','','','CENTRO','','10/01/2022','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:18},{wch:16},{wch:10},{wch:14},{wch:14},{wch:18},{wch:14},{wch:14},{wch:14},{wch:13},{wch:40}];
+  ws['!cols'] = [{wch:34},{wch:14},{wch:18},{wch:10},{wch:14},{wch:14},{wch:18},{wch:16},{wch:14},{wch:14},{wch:13},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
@@ -2768,7 +2796,7 @@ async function lerPlanilha(el, arq){
         dataAdmissao: lerData(pega('dataAdmissao')),
         dataInicio: lerData(pega('dataInicio')),
         dataDemissao: lerData(pega('dataDemissao')),
-        status: String(pega('status')||'').toUpperCase().includes('DEMIT') ? 'DEMITIDO' : 'EMPREGADO',
+        status: statusDaPlanilha(pega('status')),
         cpf: String(pega('cpf')||'').trim(), banco: String(pega('banco')||'').trim(),
         agencia: String(pega('agencia')||'').trim(), conta: String(pega('conta')||'').trim(),
         tipoConta: String(pega('tipoConta')||'').toUpperCase().includes('POUP') ? 'POUPANCA' : 'CORRENTE',
@@ -2834,7 +2862,7 @@ function passoPrevia(el, linhas, nomeArq, filiais){
         <td>${esc(l.cargo)||'—'}</td>
         <td class="mono">${dataBonita(l.dataAdmissao)}</td>
         <td class="mono">${dataBonita(l.dataInicio)}</td>
-        <td>${l.status==='DEMITIDO'?'Demitido':'Empregado'}</td>
+        <td>${(SITUACOES[l.status]||SITUACOES.EMPREGADO).rotulo}</td>
         <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis">${esc(l.observacoes)}</td>
       </tr>`).join('')}
       </tbody></table>
