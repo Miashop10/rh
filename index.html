@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01l';
+  const VERSAO_APP = '2026.09.01m';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -3660,6 +3660,9 @@ async function executarImportacao(el, linhas, duplicados){
    ================================================================== */
 const DIAS_SEM = 'Seg|Ter|Qua|Qui|Sex|S[áa]b|Dom';
 
+/* Dias que o cartão traz como abonados: não descontam e não contam como falta. */
+const RE_ABONO = /ATESTADO|DECLARA|ABONO/;
+
 function minParaHora(m){
   const sinal = m<0 ? '-' : '';
   m = Math.abs(Math.round(m));
@@ -3782,17 +3785,19 @@ function apurar(cartao, cfg){
   const tol = +cfg.tolerancia;
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
-    atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0,
+    atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0, diasAbono:0,
     alertas:[], detalhe:[]
   };
 
   cartao.dias.forEach(d=>{
-    const folga = String(d.definicao||'').toUpperCase()==='FOLGA';
+    const defDia = String(d.definicao||'').toUpperCase();
+    const folga = defDia==='FOLGA';
+    const abonado = RE_ABONO.test(defDia);
     let mc = d.marcas.slice();
     if(!mc.length){
-      /* dia sem marcação: falta desconta, folga não */
-      if(folga) r.diasFolga++; else r.diasFalta++;
-      r.detalhe.push(Object.assign({}, d, {tipo: folga?'FOLGA':'FALTA',
+      /* sem marcação: falta desconta; folga e abono (atestado, declaração) não */
+      if(abonado) r.diasAbono++; else if(folga) r.diasFolga++; else r.diasFalta++;
+      r.detalhe.push(Object.assign({}, d, {tipo: abonado?'ABONO':folga?'FOLGA':'FALTA',
         trabalhado:0, extra:0, extraNot:0, atraso:0}));
       return;
     }
@@ -3811,11 +3816,13 @@ function apurar(cartao, cfg){
     const noturno = intervalos.reduce((s,[a,b])=>s+minutosNoturnos(a,b,notIni,notFim),0);
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
-    const def = String(d.definicao||'').toUpperCase();
+    const def = defDia;
     const domingo = String(d.semana||'').toLowerCase().indexOf('dom') === 0;
     /* Domingo é dia útil com jornada própria: só o que passa dela é extra.
-       Um domingo que também seja feriado precisa da marcação 100% na edição. */
-    const feriado = def === 'FERIADO' || (!domingo && (d.ch === 0 || def !== 'DIA NORMAL'));
+       Um domingo que também seja feriado precisa da marcação 100% na edição.
+       Dia abonado que teve marcação conta como dia comum, não como feriado. */
+    const feriado = def === 'FERIADO' ||
+      (!domingo && !abonado && (d.ch === 0 || def !== 'DIA NORMAL'));
     const cem = feriado || (domingo && cfg.domingoExtra !== '50');
     const base = feriado ? 0
       : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
@@ -3835,12 +3842,12 @@ function apurar(cartao, cfg){
     else   { r.he50d  += extraDiu; r.he50n  += extraNot; }
 
     let atraso = 0;
-    if(base > 0){
+    if(base > 0 && !abonado){
       const falta = base - trabalhado;
       if(falta > tol){ atraso = falta; r.atrasos += falta; r.diasAtraso++; }
     }
     r.detalhe.push(Object.assign({}, d, {
-      tipo: feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
+      tipo: abonado ? 'ABONO' : feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
       trabalhado, extra, extraNot, atraso
     }));
   });
@@ -3929,7 +3936,7 @@ function gradeCartao(op){
         <table><thead><tr>
           <th style="width:96px">Data</th><th style="width:44px">Dia</th>
           <th>Marcações do dia</th><th style="width:86px">Carga</th>
-          <th style="width:58px">Folga</th><th style="width:58px">100%</th>
+          <th style="width:58px">Folga</th><th style="width:58px">Abono</th><th style="width:58px">100%</th>
           <th style="width:150px">Cálculo</th>
         </tr></thead><tbody>
         ${dias.map((d,i)=>`<tr>
@@ -3943,6 +3950,8 @@ function gradeCartao(op){
                      style="width:78px;font-family:'JetBrains Mono',monospace"></td>
           <td style="text-align:center"><input type="checkbox" class="m-folga" data-i="${i}"
                      ${d.folga?'checked':''} title="Folga: o dia não conta como falta"></td>
+          <td style="text-align:center"><input type="checkbox" class="m-abono" data-i="${i}"
+                     ${d.abono?'checked':''} title="Atestado, declaração ou abono: não conta como falta nem gera atraso"></td>
           <td style="text-align:center"><input type="checkbox" class="m-cem" data-i="${i}"
                      ${d.cem?'checked':''} title="Feriado ou dia trabalhado na folga: tudo a 100%"></td>
           <td class="mono" id="mCalc${i}" style="color:var(--apagado)">—</td>
@@ -3981,10 +3990,13 @@ function gradeCartao(op){
       const chTxt = el.querySelector(`.m-ch[data-i="${i}"]`).value.trim();
       const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
       const folga = el.querySelector(`.m-folga[data-i="${i}"]`).checked;
+      const abono = el.querySelector(`.m-abono[data-i="${i}"]`).checked;
       const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada) : cfg.jornada;
       const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
       /* folga só vale enquanto não há batida; com batida o dia é trabalho na folga */
-      const definicao = (folga && !marcas.length) ? 'Folga' : (cem || (folga && marcas.length)) ? 'Feriado' : 'Dia Normal';
+      const definicao = abono ? (d.definicaoAbono || 'Abono')
+        : (folga && !marcas.length) ? 'Folga'
+        : (cem || (folga && marcas.length)) ? 'Feriado' : 'Dia Normal';
       return {data:d.data, semana:d.semana, definicao, marcas, ch, relDiurno:0, relNoturno:0, relSaldo:0};
     });
   };
@@ -3995,8 +4007,8 @@ function gradeCartao(op){
       const cel = q('#mCalc'+i);
       if(!cel) return;
       if(!d.marcas.length){
-        cel.textContent = d.tipo==='FOLGA' ? 'folga' : 'falta';
-        cel.style.color = d.tipo==='FOLGA' ? 'var(--apagado)' : 'var(--vermelho)';
+        cel.textContent = d.tipo==='FOLGA' ? 'folga' : d.tipo==='ABONO' ? 'abono' : 'falta';
+        cel.style.color = d.tipo==='FALTA' ? 'var(--vermelho)' : 'var(--apagado)';
         return;
       }
       const partes = [minParaHora(d.trabalhado)];
@@ -4012,10 +4024,13 @@ function gradeCartao(op){
       <div><b>${minParaHora(r.noturno)}</b> adicional noturno</div>
       <div><b style="color:var(--vermelho)">${minParaHora(r.atrasos)}</b> atrasos</div>
       <div><b style="color:${r.diasFalta?'var(--vermelho)':'inherit'}">${r.diasFalta}</b> faltas</div>
-      <div><b>${r.diasFolga}</b> folgas</div>`;
+      <div><b>${r.diasFolga}</b> folgas</div>
+      <div><b>${r.diasAbono}</b> abonos</div>`;
   };
 
-  el.querySelectorAll('.m-batida, .m-ch, .m-cem, .m-folga').forEach(c=>{ c.oninput = atualizar; c.onchange = atualizar; });
+  el.querySelectorAll('.m-batida, .m-ch, .m-cem, .m-folga, .m-abono').forEach(c=>{
+    c.oninput = atualizar; c.onchange = atualizar;
+  });
   el.querySelectorAll('.m-batida').forEach((c,i,todos)=>{
     c.onkeydown = ev=>{ if(ev.key==='Enter' && todos[i+1]){ ev.preventDefault(); todos[i+1].focus(); } };
   });
@@ -4077,7 +4092,8 @@ function guardarResultado(item, indice){
 /* foto nova: mês em branco para digitar */
 function digitarCartao(arquivo){
   const dias = diasDaCompetencia(S.competencia).map(d=>({
-    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null, cem:false, folga:false
+    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null,
+    cem:false, folga:false, abono:false
   }));
   return gradeCartao({
     titulo:'Digitar marcações',
@@ -4098,13 +4114,18 @@ function editarResultado(i){
     domingo: String(d.semana||'').toLowerCase().indexOf('dom')===0,
     marcas: (d.marcas||[]).slice(), ch: d.ch,
     folga: String(d.definicao||'').toUpperCase() === 'FOLGA',
-    cem: d.ch === 0 || ['DIA NORMAL','FOLGA'].indexOf(String(d.definicao||'').toUpperCase()) < 0
+    abono: RE_ABONO.test(String(d.definicao||'').toUpperCase()),
+    definicaoAbono: RE_ABONO.test(String(d.definicao||'').toUpperCase()) ? d.definicao : '',
+    cem: d.ch === 0 ||
+      (!RE_ABONO.test(String(d.definicao||'').toUpperCase()) &&
+       ['DIA NORMAL','FOLGA'].indexOf(String(d.definicao||'').toUpperCase()) < 0)
   }));
   return gradeCartao({
     titulo: r.nome,
     subtitulo:'Corrigir marcações · '+esc(r.arquivo||'digitado'),
-    aviso:'Ajuste as batidas, a carga do dia, marque um feriado ou troque uma falta por folga. '+
-          'Dia marcado como folga não entra na contagem de faltas. Os totais mudam na hora.',
+    aviso:'Ajuste as batidas e a carga do dia, marque um feriado, ou troque uma falta por '+
+          'folga ou abono. Atestado e declaração vindos do cartão já entram como abono. '+
+          'Folga e abono não contam como falta. Os totais mudam na hora.',
     dias, nomeArquivo: r.arquivo, cargo: r.cargo,
     funcionarioId: r.funcionarioId, nome: r.nome,
     observacoes: r.observacoes, calculoId: r.calculoId,
@@ -4184,7 +4205,7 @@ function tabelaHoras(){
         <td class="mono" style="color:var(--verde);font-weight:700">${minParaHora(r.ap.he100)}</td>
         <td class="mono">${minParaHora(r.ap.noturno)}</td>
         <td class="mono" style="color:${r.ap.atrasos?'var(--vermelho)':'inherit'}">${minParaHora(r.ap.atrasos)}</td>
-        <td class="mono">${r.ap.diasFalta}${r.ap.diasFolga?` <span style="color:var(--apagado)">+${r.ap.diasFolga} folga</span>`:''}</td>
+        <td class="mono">${r.ap.diasFalta}${r.ap.diasFolga?` <span style="color:var(--apagado)">+${r.ap.diasFolga} folga</span>`:''}${r.ap.diasAbono?` <span style="color:var(--apagado)">+${r.ap.diasAbono} abono</span>`:''}</td>
         <td><input class="entrada obs-he" data-obs="${i}" value="${esc(r.observacoes||'')}"
                    placeholder="Anotação"></td>
         <td style="white-space:nowrap;text-align:right">
@@ -4327,6 +4348,7 @@ function detalheHoras(i){
         <div><b style="color:var(--vermelho)">${minParaHora(r.ap.atrasos)}</b> atrasos em ${r.ap.diasAtraso} dia(s)</div>
         <div><b style="color:${r.ap.diasFalta?'var(--vermelho)':'inherit'}">${r.ap.diasFalta}</b> faltas</div>
         <div><b>${r.ap.diasFolga||0}</b> folgas</div>
+        <div><b>${r.ap.diasAbono||0}</b> abonos (atestado/declaração)</div>
       </div>
       ${r.ap.alertas.length?`<div class="aviso erro">${r.ap.alertas.map(esc).join('<br>')}</div>`:''}
       <div class="previa">
@@ -4337,7 +4359,9 @@ function detalheHoras(i){
         ${r.ap.detalhe.map(d=>`<tr>
           <td class="mono">${esc(d.data)}</td><td>${esc(d.semana)}</td>
           <td>${d.tipo==='FALTA'?'<span class="tag erro">Falta</span>'
-                : d.tipo==='FOLGA'?'<span class="tag atual">Folga</span>':esc(d.definicao)}</td>
+                : d.tipo==='FOLGA'?'<span class="tag atual">Folga</span>'
+                : d.tipo==='ABONO'?`<span class="tag novo">${esc(d.definicao||'Abono')}</span>`
+                : esc(d.definicao)}</td>
           <td class="mono" style="color:var(--apagado)">${d.marcas.map(minParaHora).join(' · ')||'—'}</td>
           <td class="mono">${minParaHora(d.trabalhado)}</td>
           <td class="mono" style="color:var(--apagado)">${minParaHora(d.ch)}</td>
@@ -4379,7 +4403,7 @@ function linhasResumo(){
   return [['FUNCIONÁRIO','FILIAL','CARGO','PERÍODO','CÁLCULO','JORNADA','JORNADA DOMINGO',
            'DIAS TRABALHADOS','DIAS SEM MARCAÇÃO',
            'HORAS TRABALHADAS','HE 50%','HE 100%','HE NOTURNAS','ADICIONAL NOTURNO',
-           'ATRASOS','DIAS COM ATRASO','DIAS DE FOLGA','OBSERVAÇÕES']]
+           'ATRASOS','DIAS COM ATRASO','DIAS DE FOLGA','DIAS ABONADOS','OBSERVAÇÕES']]
     .concat(S.he.resultados.map(r=>[
       r.nome, r.filial||'', r.cargo||'', r.periodoIni+' a '+r.periodoFim,
       calculoPor(r.calculoId).nome, calculoPor(r.calculoId).jornada,
@@ -4387,7 +4411,7 @@ function linhasResumo(){
       r.ap.diasTrabalhados, r.ap.diasFalta, minParaHora(r.ap.trabalhado),
       minParaHora(r.ap.he50), minParaHora(r.ap.he100), minParaHora(r.ap.heNoturnas),
       minParaHora(r.ap.noturno), minParaHora(r.ap.atrasos), r.ap.diasAtraso,
-      r.ap.diasFolga || 0, r.observacoes || ''
+      r.ap.diasFolga || 0, r.ap.diasAbono || 0, r.observacoes || ''
     ]));
 }
 
@@ -4401,7 +4425,8 @@ async function exportarHorasExcel(){
 
   const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH','EXTRA','EXTRA NOTURNA','ATRASO']];
   S.he.resultados.forEach(r=> r.ap.detalhe.forEach(d=> det.push([
-    r.nome, d.data, d.semana, d.tipo==='FALTA'?'FALTA':d.tipo==='FOLGA'?'FOLGA':d.definicao,
+    r.nome, d.data, d.semana,
+    d.tipo==='FALTA'?'FALTA':d.tipo==='FOLGA'?'FOLGA':d.definicao,
     d.marcas.map(minParaHora).join(' '), minParaHora(d.trabalhado), minParaHora(d.ch),
     minParaHora(d.extra), minParaHora(d.extraNot||0), minParaHora(d.atraso)
   ])));
