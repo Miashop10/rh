@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01m';
+  const VERSAO_APP = '2026.09.01n';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -3764,15 +3764,17 @@ function extrairCartoes(paginas, nomeArquivo){
 
 
 /* ---------- cálculos cadastrados ---------- */
-const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaDomingo:'06:00',
-  tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00', base:'FIXA', domingoExtra:'100'};
+const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
+  jornadaDomingo:'06:00', tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00',
+  base:'FIXA', domingoExtra:'100'};
 
 function calculoPor(id){
   return S.he.calculos.find(c=>c.id===id) || S.he.calculos[0] || CALCULO_PADRAO;
 }
 function calculoAtual(){ return calculoPor(S.he.calculoId); }
 function resumoCalculo(c){
-  return c.jornada+' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
+  return c.jornada+' · sáb '+(c.jornadaSabado||c.jornada)+
+         ' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
          ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
          ' · tol. '+c.tolerancia+' min'+(c.base==='CH'?' · base CH':'');
 }
@@ -3781,6 +3783,7 @@ function resumoCalculo(c){
 function apurar(cartao, cfg){
   const notIni = horaParaMin(cfg.noturnoIni), notFim = horaParaMin(cfg.noturnoFim);
   const jornadaFixa = horaParaMin(cfg.jornada);
+  const jornadaSab = horaParaMin(cfg.jornadaSabado || cfg.jornada);
   const jornadaDom = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
   const tol = +cfg.tolerancia;
   const r = {
@@ -3817,7 +3820,9 @@ function apurar(cartao, cfg){
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
     const def = defDia;
-    const domingo = String(d.semana||'').toLowerCase().indexOf('dom') === 0;
+    const semana = String(d.semana||'').toLowerCase();
+    const domingo = semana.indexOf('dom') === 0;
+    const sabado = /^s[aá]b/.test(semana);
     /* Domingo é dia útil com jornada própria: só o que passa dela é extra.
        Um domingo que também seja feriado precisa da marcação 100% na edição.
        Dia abonado que teve marcação conta como dia comum, não como feriado. */
@@ -3826,6 +3831,7 @@ function apurar(cartao, cfg){
     const cem = feriado || (domingo && cfg.domingoExtra !== '50');
     const base = feriado ? 0
       : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
+      : sabado ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
       : (cfg.base === 'CH' ? d.ch : jornadaFixa);
     const extra = Math.max(0, trabalhado - base);
 
@@ -3876,7 +3882,8 @@ function diasDaCompetencia(comp){
     dias.push({
       data: String(d).padStart(2,'0')+'/'+String(mes).padStart(2,'0')+'/'+ano,
       semana: SEMANA[data.getDay()],
-      domingo: data.getDay()===0
+      domingo: data.getDay()===0,
+      sabado: data.getDay()===6
     });
   }
   return dias;
@@ -3946,7 +3953,10 @@ function gradeCartao(op){
                      value="${esc((d.marcas||[]).map(minParaHora).join(' '))}"
                      style="width:100%;font-family:'JetBrains Mono',monospace"></td>
           <td><input class="entrada m-ch" data-i="${i}"
-                     value="${esc(minParaHora(d.ch != null ? d.ch : horaParaMin(d.domingo ? calculoAtual().jornadaDomingo : calculoAtual().jornada)))}"
+                     value="${esc(minParaHora(d.ch != null ? d.ch : horaParaMin(
+                       d.domingo ? calculoAtual().jornadaDomingo
+                       : d.sabado ? (calculoAtual().jornadaSabado || calculoAtual().jornada)
+                       : calculoAtual().jornada)))}"
                      style="width:78px;font-family:'JetBrains Mono',monospace"></td>
           <td style="text-align:center"><input type="checkbox" class="m-folga" data-i="${i}"
                      ${d.folga?'checked':''} title="Folga: o dia não conta como falta"></td>
@@ -3991,7 +4001,8 @@ function gradeCartao(op){
       const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
       const folga = el.querySelector(`.m-folga[data-i="${i}"]`).checked;
       const abono = el.querySelector(`.m-abono[data-i="${i}"]`).checked;
-      const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada) : cfg.jornada;
+      const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada)
+                   : d.sabado ? (cfg.jornadaSabado || cfg.jornada) : cfg.jornada;
       const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
       /* folga só vale enquanto não há batida; com batida o dia é trabalho na folga */
       const definicao = abono ? (d.definicaoAbono || 'Abono')
@@ -4092,7 +4103,7 @@ function guardarResultado(item, indice){
 /* foto nova: mês em branco para digitar */
 function digitarCartao(arquivo){
   const dias = diasDaCompetencia(S.competencia).map(d=>({
-    data:d.data, semana:d.semana, domingo:d.domingo, marcas:[], ch:null,
+    data:d.data, semana:d.semana, domingo:d.domingo, sabado:d.sabado, marcas:[], ch:null,
     cem:false, folga:false, abono:false
   }));
   return gradeCartao({
@@ -4112,6 +4123,7 @@ function editarResultado(i){
   const dias = r.cartao.dias.map(d=>({
     data: d.data, semana: d.semana,
     domingo: String(d.semana||'').toLowerCase().indexOf('dom')===0,
+    sabado: /^s[aá]b/.test(String(d.semana||'').toLowerCase()),
     marcas: (d.marcas||[]).slice(), ch: d.ch,
     folga: String(d.definicao||'').toUpperCase() === 'FOLGA',
     abono: RE_ABONO.test(String(d.definicao||'').toUpperCase()),
@@ -4462,7 +4474,8 @@ async function exportarHorasPdf(){
       const usados = [...new Set(S.he.resultados.map(r=>calculoPor(r.calculoId).nome))];
       pg.drawText('Cálculo: '+usados.map(n=>{
           const c = S.he.calculos.find(x=>x.nome===n) || CALCULO_PADRAO;
-          return n+' ('+c.jornada+' / dom '+c.jornadaDomingo+')';
+          return n+' ('+c.jornada+' / sáb '+(c.jornadaSabado||c.jornada)+
+                 ' / dom '+c.jornadaDomingo+')';
         }).join('  ·  '),
         {x:m, y:y-38, size:8, font:fonte, color:rgb(.42,.45,.5)});
       y -= 58;
@@ -4540,8 +4553,9 @@ function linhaCalculo(c, novo){
   return `<tr data-calc-id="${esc(c.id||'')}" ${novo?'data-novo="1"':''}>
     <td><input class="entrada" data-c="nome" value="${esc(c.nome||'')}"
                placeholder="${novo?'Ex.: CALCULO 02':''}" style="min-width:130px"></td>
-    <td><input class="entrada mono" data-c="jornada" value="${esc(c.jornada||'07:20')}" style="width:76px"></td>
-    <td><input class="entrada mono" data-c="jornadaDomingo" value="${esc(c.jornadaDomingo||'06:00')}" style="width:76px"></td>
+    <td><input class="entrada mono" data-c="jornada" value="${esc(c.jornada||'07:20')}" style="width:72px"></td>
+    <td><input class="entrada mono" data-c="jornadaSabado" value="${esc(c.jornadaSabado||c.jornada||'07:20')}" style="width:72px"></td>
+    <td><input class="entrada mono" data-c="jornadaDomingo" value="${esc(c.jornadaDomingo||'06:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoIni" value="${esc(c.noturnoIni||'22:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoFim" value="${esc(c.noturnoFim||'05:00')}" style="width:72px"></td>
     <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolerancia"
@@ -4575,7 +4589,7 @@ function desenharCalculos(el){
     </div>
     <div class="previa" style="max-height:none">
       <table><thead><tr>
-        <th>Nome</th><th>Seg a sáb</th><th>Domingo</th><th>Noturno de</th><th>até</th>
+        <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Domingo</th><th>Noturno de</th><th>até</th>
         <th>Tolerância</th><th>Base</th><th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
@@ -4593,7 +4607,8 @@ function desenharCalculos(el){
     const v = campo => tr.querySelector(`[data-c="${campo}"]`).value;
     const calculo = {
       id: tr.dataset.novo ? '' : tr.dataset.calcId,
-      nome: v('nome'), jornada: v('jornada'), jornadaDomingo: v('jornadaDomingo'),
+      nome: v('nome'), jornada: v('jornada'),
+      jornadaSabado: v('jornadaSabado'), jornadaDomingo: v('jornadaDomingo'),
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
       tolerancia: v('tolerancia'), base: v('base'), domingoExtra: v('domingoExtra')
     };
