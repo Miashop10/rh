@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.01n';
+  const VERSAO_APP = '2026.09.20c';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -260,6 +260,53 @@ textarea.entrada{min-height:70px;resize:vertical}
 .link-acao.rem{color:var(--vermelho)}
 .link-acao.apr{color:var(--verde)}
 .check-exp{position:absolute;top:6px;left:6px;width:18px;height:18px;accent-color:var(--tinta);z-index:2}
+.qtd-arq{
+  margin-left:auto;font-size:9px;font-weight:700;background:var(--tinta);color:#fff;
+  min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 4px;
+}
+.tab-hist{width:100%;border-collapse:collapse;font-size:13px}
+.tab-hist th{
+  position:sticky;top:0;background:#f6f7f9;text-align:left;padding:7px 9px;z-index:2;
+  font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--apagado);
+  font-weight:700;border-bottom:1px solid var(--linha);
+}
+.tab-hist td{padding:5px 9px;border-bottom:1px solid #f1f3f5;vertical-align:middle}
+.tab-hist tr.hist-item{cursor:pointer}
+.tab-hist tr.hist-item:hover{background:#fafbfc}
+.tab-hist tr.hist-cab td{
+  background:#eef1f5;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  font-weight:700;color:var(--grafite);padding:6px 9px;
+  border-top:1px solid var(--linha-forte);
+}
+.tab-hist tr.hist-cab td span{
+  font-weight:400;letter-spacing:0;text-transform:none;color:var(--apagado);margin-left:8px;
+}
+.tab-hist input[type=checkbox]{width:15px;height:15px;accent-color:var(--tinta);cursor:pointer}
+.hist-anexo{display:flex;align-items:center;gap:8px;min-width:0}
+.hist-thumb{
+  width:30px;height:30px;border:1px solid var(--linha);border-radius:2px;overflow:hidden;
+  display:grid;place-items:center;background:#f4f6f8;flex:none;
+}
+.hist-thumb img{width:100%;height:100%;object-fit:cover}
+.hist-thumb .pdf-marca{font-size:8px}
+.hist-nome{color:var(--apagado);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.tira-arq{display:flex;gap:4px;flex-wrap:wrap;padding:6px 6px 0}
+.arq-min{
+  position:relative;width:34px;height:34px;border:1px solid var(--linha);border-radius:2px;
+  overflow:hidden;cursor:pointer;background:#f4f6f8;display:block;flex:none;
+}
+.arq-min.ok{border-color:var(--verde)}
+.arq-min:hover{border-color:var(--tinta)}
+.arq-min-img{width:100%;height:100%;display:grid;place-items:center}
+.arq-min-img img{width:100%;height:100%;object-fit:cover}
+.arq-min-img .pdf-marca{font-size:8px;letter-spacing:.06em}
+.arq-x{
+  position:absolute;top:0;right:0;width:14px;height:14px;line-height:1;font-size:9px;
+  background:rgba(16,18,21,.72);color:#fff;display:none;place-items:center;
+}
+.arq-min:hover .arq-x{display:grid}
+.arq-x:hover{background:var(--vermelho)}
 .hist-comp{margin-top:22px;border-top:1px solid var(--linha);padding-top:16px}
 .hist-titulo{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--apagado);font-weight:600;margin-bottom:10px}
 .hist-linha{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f3f5;font-size:13px;flex-wrap:wrap}
@@ -871,9 +918,10 @@ function situacao(f){
   }
   const meus = docsDe(f.id, S.competencia);
   const obrig = S.config.tiposObrigatorios;
-  const achados = obrig.map(t=>meus.find(d=>d.tipo===t));
-  if(achados.some(d=>!d)) return 'vermelho';
-  return achados.every(d=>d.status==='APROVADO') ? 'verde' : 'ambar';
+  const grupos = obrig.map(t=>meus.filter(d=>d.tipo===t));
+  if(grupos.some(g=>!g.length)) return 'vermelho';
+  /* um campo só fica verde quando todos os seus arquivos foram conferidos */
+  return grupos.every(g=>g.every(d=>d.status==='APROVADO')) ? 'verde' : 'ambar';
 }
 
 const SITUACOES = {
@@ -1028,7 +1076,8 @@ function linhaFuncionario(f){
     <td class="mono">${dataBonita(f.dataAdmissao)}</td>
     <td class="t-banco mono" title="${esc(dica)}">${bancoResumido(f)}</td>
     <td>${selo(f.status)}</td>
-    <td><button class="btn sec mini" data-docs="${f.id}">Documentos</button></td>
+    <td style="white-space:nowrap"><button class="btn sec mini" data-docs="${f.id}">Documentos</button>${
+      podeAprovar()?` <button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}</td>
     <td><button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></td>
@@ -1067,6 +1116,7 @@ function telaEx(){
         <div class="esconde-mob">${selo('DEMITIDO')}</div>
         <div class="acoes">
           <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
+          ${podeAprovar()?`<button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}
           <button class="btn sec mini" data-editar="${f.id}">Editar</button>
         </div>
       </div>`).join('')}
@@ -1154,6 +1204,9 @@ function ligarEventos(){
   if(imp) imp.onclick = abrirImportacao;
   document.querySelectorAll('[data-docs]').forEach(b=> b.onclick = e=>{
     e.stopPropagation(); abrirDocumentos(b.dataset.docs);
+  });
+  document.querySelectorAll('[data-hist]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation(); abrirHistorico(b.dataset.hist);
   });
   document.querySelectorAll('[data-pend]').forEach(tr=> tr.onclick = ()=>{
     S.pendAberta = S.pendAberta===tr.dataset.pend ? null : tr.dataset.pend;
@@ -1329,20 +1382,23 @@ async function abrirDocumentos(funcId){
     </div>
     <div class="modal-corpo" id="docsCorpo"></div>
     <div class="modal-pe">
+      ${podeAprovar()?`
       <button class="btn sec" id="expSel" style="margin-right:auto">Exportar selecionados em PDF</button>
-      <button class="btn sec" id="expTudo">Exportar tudo em PDF</button>
+      <button class="btn sec" id="expTudo">Exportar tudo em PDF</button>`:'<span style="margin-right:auto"></span>'}
       ${podeAprovar()?'<button class="btn" id="aprovarTudo">Aprovar mês inteiro</button>':''}
     </div>`, true);
 
   el._func = f;
   desenharDocs(el);
 
-  el.querySelector('#expSel').onclick = ()=>{
+  const bSel = el.querySelector('#expSel');
+  if(bSel) bSel.onclick = ()=>{
     const sel = S.docsLista.filter(d=>S.selecao.has(d.id));
     if(!sel.length) return toast('Selecione ao menos um documento.', true);
     exportarPdf(sel, f);
   };
-  el.querySelector('#expTudo').onclick = ()=>{
+  const bTudo = el.querySelector('#expTudo');
+  if(bTudo) bTudo.onclick = ()=>{
     if(!S.docsLista.length) return toast('Não há documentos para exportar.', true);
     exportarPdf(S.docsLista.slice(), f, true);
   };
@@ -1392,7 +1448,7 @@ function desenharDocs(el){
     <div class="grade-docs">`;
 
   tipos.forEach(t=>{
-    html += cardDoc(t, doMes.find(d=>d.tipo===t), f);
+    html += cardDoc(t, doMes.filter(d=>d.tipo===t), f);
   });
   html += `</div></div>`;
 
@@ -1400,9 +1456,11 @@ function desenharDocs(el){
     <div class="titulo-grupo" style="margin-top:0">Opcionais<small>fora da cor do nome</small></div>
     <div class="grade-docs">`;
   opcionais.forEach(t=>{
-    html += cardDoc(t, doMes.find(d=>d.tipo===t), f, true);
+    html += cardDoc(t, doMes.filter(d=>d.tipo===t), f, true);
   });
-  extras.forEach(d=> html += cardDoc(d.tipo, d, f, true));
+  [...new Set(extras.map(d=>d.tipo))].forEach(t=>{
+    html += cardDoc(t, extras.filter(d=>d.tipo===t), f, true);
+  });
   html += `
       <div class="card-doc falta">
         <div class="card-doc-topo"><span class="ponto" style="background:#c8ccd3"></span><span class="card-doc-tipo">OUTRO</span></div>
@@ -1426,7 +1484,7 @@ function desenharDocs(el){
         <span style="color:var(--apagado)">${esc(d.arquivoNome)}</span>
         <span style="margin-left:auto"></span>
         <button class="link-acao" data-ver="${d.id}">Ver</button>
-        <button class="link-acao" data-baixar="${d.id}">PDF</button>
+        ${podeAprovar()?`<button class="link-acao" data-baixar="${d.id}">PDF</button>`:''}
         ${podeAprovar()&&d.status!=='APROVADO'?`<button class="link-acao apr" data-aprovar="${d.id}">Aprovar</button>`:''}
         <button class="link-acao rem" data-excluir="${d.id}">Excluir</button>
       </div>`;
@@ -1438,8 +1496,19 @@ function desenharDocs(el){
   ligarEventosDocs(el);
 }
 
-function cardDoc(tipo, d, f, opcional){
-  if(!d){
+function miolo(d){
+  return d.miniatura
+    ? `<img src="data:image/jpeg;base64,${d.miniatura}" alt="${esc(d.tipo)}">`
+    : d.mimeType==='application/pdf'
+      ? '<span class="pdf-marca">PDF</span>'
+      : '<span class="pdf-marca">Carregando…</span>';
+}
+
+/* Um campo pode ter vários arquivos: frente e verso, páginas soltas, uma
+   segunda foto melhor. O primeiro aparece grande e os demais numa tira. */
+function cardDoc(tipo, docs, f, opcional){
+  docs = (docs||[]).slice().sort((a,b)=>String(a.enviadoEm||'').localeCompare(String(b.enviadoEm||'')));
+  if(!docs.length){
     return `<div class="card-doc falta">
       <div class="card-doc-topo">
         <span class="ponto ${opcional?'p-neutro':'p-vermelho'}"></span>
@@ -1448,25 +1517,35 @@ function cardDoc(tipo, d, f, opcional){
       <div class="card-doc-pe"><button class="link-acao" data-anexar="${esc(tipo)}">+ Anexar</button></div>
     </div>`;
   }
-  const cor = d.status==='APROVADO' ? 'verde' : 'ambar';
+  const principal = docs[0];
+  const ids = docs.map(d=>d.id);
+  const todosAprovados = docs.every(d=>d.status==='APROVADO');
+  const cor = todosAprovados ? 'verde' : 'ambar';
+  const marcados = ids.every(id=>S.selecao.has(id));
+
   return `<div class="card-doc">
-    <div class="card-doc-topo"><span class="ponto p-${cor}"></span><span class="card-doc-tipo">${esc(d.tipo)}</span></div>
-    <div class="miniatura" data-ver="${d.id}" title="Abrir em tamanho grande">
-      <input type="checkbox" class="check-exp chk" data-id="${d.id}" ${S.selecao.has(d.id)?'checked':''} title="Selecionar para exportar">
-      <div id="mini-${d.id}" style="width:100%;height:100%;display:grid;place-items:center">
-        ${d.miniatura
-          ? `<img src="data:image/jpeg;base64,${d.miniatura}" alt="${esc(d.tipo)}">`
-          : d.mimeType==='application/pdf'
-            ? '<span class="pdf-marca">PDF</span>'
-            : '<span class="pdf-marca">Carregando…</span>'}
+    <div class="card-doc-topo"><span class="ponto p-${cor}"></span>
+      <span class="card-doc-tipo">${esc(tipo)}</span>
+      ${docs.length>1?`<span class="qtd-arq" title="${docs.length} arquivos">${docs.length}</span>`:''}</div>
+    <div class="miniatura" data-ver="${principal.id}" title="Abrir em tamanho grande">
+      <input type="checkbox" class="check-exp chk" data-ids="${ids.join(',')}" ${marcados?'checked':''}
+             title="Selecionar ${docs.length>1?'os '+docs.length+' arquivos':'para exportar'}">
+      <div id="mini-${principal.id}" style="width:100%;height:100%;display:grid;place-items:center">
+        ${miolo(principal)}
       </div>
     </div>
+    ${docs.length>1?`<div class="tira-arq">${docs.map((d,i)=>`
+      <span class="arq-min ${d.status==='APROVADO'?'ok':''}" data-ver="${d.id}"
+            title="Arquivo ${i+1} de ${docs.length} — ${esc(d.arquivoNome)}">
+        <span id="mini-${d.id}" class="arq-min-img">${miolo(d)}</span>
+        <button class="arq-x" data-excluir="${d.id}" title="Excluir este arquivo">✕</button>
+      </span>`).join('')}</div>`:''}
     <div class="card-doc-pe">
-      <button class="link-acao" data-anexar="${esc(d.tipo)}">Substituir</button>
-      ${podeAprovar() ? (d.status==='APROVADO'
-          ? `<button class="link-acao" data-reprovar="${d.id}">Reabrir</button>`
-          : `<button class="link-acao apr" data-aprovar="${d.id}">Aprovar</button>`) : ''}
-      <button class="link-acao rem" data-excluir="${d.id}">Excluir</button>
+      <button class="link-acao" data-anexar="${esc(tipo)}">+ Arquivo</button>
+      ${podeAprovar() ? (todosAprovados
+          ? `<button class="link-acao" data-reprovar="${ids.join(',')}">Reabrir</button>`
+          : `<button class="link-acao apr" data-aprovar="${ids.join(',')}">Aprovar</button>`) : ''}
+      ${docs.length===1?`<button class="link-acao rem" data-excluir="${principal.id}">Excluir</button>`:''}
     </div>
   </div>`;
 }
@@ -1528,29 +1607,179 @@ async function excluirDoc(el, id){
   }catch(e){ toast(e.message,true); } finally{ carregando(false); }
 }
 
+/* ==================================================================
+   HISTÓRICO DE DOCUMENTOS
+   Tudo o que já foi anexado para um funcionário, de todas as
+   competências, com seleção múltipla para exportar em PDF.
+   Só GERENTE RH e MASTER enxergam.
+   ================================================================== */
+async function abrirHistorico(funcId){
+  if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER veem o histórico.', true);
+  const f = S.funcionarios.find(x=>x.id===funcId);
+  carregando(true);
+  let docs;
+  try{ docs = await api('listarDocumentos',{funcionarioId:funcId}); }
+  catch(e){ carregando(false); return toast(e.message,true); }
+  carregando(false);
+
+  /* o visualizador e a exportação trabalham sobre esta lista */
+  S.docsFunc = f;
+  S.docsLista = docs;
+  S.selecao = new Set();
+
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Histórico de documentos · ${docs.length} ${docs.length===1?'anexo':'anexos'}</small>
+        <h2>${esc(f.nome)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo" id="histCorpo"></div>
+    <div class="modal-pe">
+      <span id="histContagem" style="margin-right:auto;color:var(--apagado);font-size:13px"></span>
+      <button class="btn sec" id="histSel">Exportar selecionados</button>
+      <button class="btn" id="histTudo">Exportar tudo em PDF</button>
+    </div>`, true);
+  el._func = f;
+  desenharHistorico(el);
+  return el;
+}
+
+function desenharHistorico(el){
+  const f = el._func;
+  const docs = S.docsLista.slice().sort((a,b)=>
+    b.competencia.localeCompare(a.competencia) || a.tipo.localeCompare(b.tipo,'pt-BR'));
+  const corpo = el.querySelector('#histCorpo');
+
+  if(!docs.length){
+    corpo.innerHTML = vazio('Nenhum documento anexado',
+      'Assim que a filial anexar o primeiro documento, ele aparece aqui.');
+    el.querySelector('#histSel').disabled = true;
+    el.querySelector('#histTudo').disabled = true;
+    return;
+  }
+
+  const todos = docs.every(d=>S.selecao.has(d.id));
+  let compAtual = null;
+  let linhas = '';
+  docs.forEach(d=>{
+    if(d.competencia !== compAtual){
+      compAtual = d.competencia;
+      const daComp = docs.filter(x=>x.competencia===compAtual);
+      const marcados = daComp.every(x=>S.selecao.has(x.id));
+      linhas += `<tr class="hist-cab">
+        <td><input type="checkbox" class="hist-chk-comp" data-ids="${daComp.map(x=>x.id).join(',')}"
+                   ${marcados?'checked':''} title="Selecionar o mês inteiro"></td>
+        <td colspan="4">${compBonita(compAtual)}
+          <span>${daComp.length} ${daComp.length===1?'anexo':'anexos'}</span></td>
+      </tr>`;
+    }
+    linhas += `<tr class="hist-item" data-abrir="${d.id}">
+      <td><input type="checkbox" class="hist-chk" data-id="${d.id}" ${S.selecao.has(d.id)?'checked':''}></td>
+      <td><b>${esc(d.tipo)}</b></td>
+      <td class="mono">${compBonita(d.competencia)}</td>
+      <td class="hist-anexo">
+        <span class="hist-thumb">${d.miniatura
+          ? `<img src="data:image/jpeg;base64,${d.miniatura}" alt="">`
+          : `<span class="pdf-marca">${d.mimeType==='application/pdf'?'PDF':'IMG'}</span>`}</span>
+        <span class="hist-nome">${esc(d.arquivoNome)}</span>
+      </td>
+      <td style="text-align:right;white-space:nowrap">
+        <span class="tag ${d.status==='APROVADO'?'novo':'dup'}">${d.status==='APROVADO'?'Conferido':'A conferir'}</span>
+        <button class="link-acao" data-abrir-b="${d.id}">Abrir</button>
+      </td>
+    </tr>`;
+  });
+
+  corpo.innerHTML = `
+    <div class="aviso info">
+      Clique num lançamento para abrir o documento. Marque quantos quiser e use
+      <b>Exportar selecionados</b>; o PDF sai com o nome do documento e a competência.
+    </div>
+    <div class="previa" style="max-height:52vh">
+      <table class="tab-hist"><thead><tr>
+        <th style="width:34px"><input type="checkbox" id="histTodos" ${todos?'checked':''}
+                   title="Selecionar tudo"></th>
+        <th>Documento</th><th style="width:96px">Mês/ano</th><th>Anexo</th><th style="width:170px"></th>
+      </tr></thead><tbody>${linhas}</tbody></table>
+    </div>`;
+
+  ligarHistorico(el);
+}
+
+function ligarHistorico(el){
+  const marcar = (ids, ligado)=>{
+    ids.forEach(id=> ligado ? S.selecao.add(id) : S.selecao.delete(id));
+    desenharHistorico(el);
+  };
+
+  const todos = el.querySelector('#histTodos');
+  if(todos) todos.onclick = ev=>{
+    ev.stopPropagation();
+    marcar(S.docsLista.map(d=>d.id), todos.checked);
+  };
+  el.querySelectorAll('.hist-chk-comp').forEach(c=> c.onclick = ev=>{
+    ev.stopPropagation();
+    marcar(c.dataset.ids.split(','), c.checked);
+  });
+  el.querySelectorAll('.hist-chk').forEach(c=> c.onclick = ev=>{
+    ev.stopPropagation();
+    marcar([c.dataset.id], c.checked);
+  });
+  el.querySelectorAll('.hist-item').forEach(tr=> tr.onclick = ()=>verDocumento(tr.dataset.abrir));
+  el.querySelectorAll('[data-abrir-b]').forEach(b=> b.onclick = ev=>{
+    ev.stopPropagation(); verDocumento(b.dataset.abrirB);
+  });
+
+  const n = S.selecao.size;
+  const cont = el.querySelector('#histContagem');
+  if(cont) cont.textContent = n ? n+(n===1?' documento selecionado':' documentos selecionados') : '';
+  const bSel = el.querySelector('#histSel');
+  if(bSel){
+    bSel.disabled = !n;
+    bSel.onclick = ()=>{
+      const sel = S.docsLista.filter(d=>S.selecao.has(d.id));
+      if(!sel.length) return toast('Marque ao menos um documento.', true);
+      exportarPdf(sel, el._func);
+    };
+  }
+  const bTudo = el.querySelector('#histTudo');
+  if(bTudo) bTudo.onclick = ()=> exportarPdf(S.docsLista.slice(), el._func, true);
+}
+
 /* ---------- UPLOAD ---------- */
 function anexar(el, tipo){
   const inp = document.createElement('input');
-  inp.type='file'; inp.accept='image/*,application/pdf';
+  inp.type='file'; inp.accept='image/*,application/pdf'; inp.multiple = true;
   inp.onchange = async ()=>{
-    const arq = inp.files[0];
-    if(!arq) return;
+    const arquivos = [...inp.files];
+    if(!arquivos.length) return;
     carregando(true);
+    let enviados = 0;
     try{
-      const pronto = await prepararArquivo(arq);
-      const doc = await api('enviarDocumento', {
-        funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
-        mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
-      });
-      doc.miniatura = pronto.miniatura;
-      /* o servidor já devolveu o documento salvo: atualiza em memória
-         em vez de baixar a lista toda de novo */
-      S.docsLista = S.docsLista.filter(d=>
-        !(d.tipo===doc.tipo && d.competencia===doc.competencia));
-      S.docsLista.push(doc);
+      let reduzidos = 0;
+      for(const arq of arquivos){
+        const pronto = await prepararArquivo(arq);
+        if(!pronto.original && arq.type && arq.type.indexOf('image')===0) reduzidos++;
+        const doc = await api('enviarDocumento', {
+          funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
+          mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
+        });
+        doc.miniatura = pronto.miniatura;
+        /* o servidor já devolveu o documento salvo: soma em memória
+           em vez de baixar a lista toda de novo */
+        S.docsLista.push(doc);
+        enviados++;
+      }
       sincronizarDocs(); desenharDocs(el); desenhar();
-      toast(tipo+' de '+compBonita(S.competencia)+' anexado.');
-    }catch(e){ toast(e.message,true); } finally{ carregando(false); }
+      toast((enviados>1
+        ? enviados+' arquivos anexados em '+tipo+' de '+compBonita(S.competencia)+'.'
+        : tipo+' de '+compBonita(S.competencia)+' anexado.')
+        + (reduzidos ? ' '+reduzidos+' foto(s) acima de 12 MB foram reduzidas.' : ''));
+    }catch(e){
+      if(enviados){ sincronizarDocs(); desenharDocs(el); desenhar(); }
+      toast(e.message,true);
+    }
+    finally{ carregando(false); }
   };
   inp.click();
 }
@@ -1572,6 +1801,13 @@ function medidas(w, h, max){
 /* Gera o arquivo que vai para o Drive e, junto, uma miniatura leve.
    A miniatura fica guardada na planilha e volta com a lista de documentos,
    então a tela abre sem baixar as imagens grandes uma a uma. */
+/* Estes documentos podem virar prova em processo trabalhista, então a foto
+   original é guardada sem recompressão sempre que couber no envio. Só arquivos
+   muito grandes são reduzidos, e ainda assim em alta resolução. */
+const LIMITE_ORIGINAL = 12 * 1024 * 1024;   /* 12 MB */
+const LADO_MAXIMO     = 3200;                /* px, quando precisa reduzir */
+const QUALIDADE_ALTA  = 0.94;
+
 async function prepararArquivo(arq){
   if(arq.type==='application/pdf'){
     const base64 = await lerBase64(arq);
@@ -1579,13 +1815,29 @@ async function prepararArquivo(arq){
     try{ miniatura = await miniaturaDoPdf(await arq.arrayBuffer()); }catch(e){}
     return {mime:'application/pdf', base64, miniatura};
   }
-  const img = await carregarImagem(arq);
-  const [w,h] = medidas(img.width, img.height, 1800);
-  const [mw,mh] = medidas(img.width, img.height, 300);
+
+  let img = null, miniatura = '';
+  try{
+    img = await carregarImagem(arq);
+    const [mw,mh] = medidas(img.width, img.height, 300);
+    miniatura = desenhaEmCanvas(img, mw, mh, 0.6);
+  }catch(e){ /* formato que o navegador não abre: sobe do jeito que veio */ }
+
+  /* arquivo dentro do limite, ou que não dá para reprocessar: vai como veio */
+  if(!img || arq.size <= LIMITE_ORIGINAL){
+    return {
+      mime: arq.type || 'image/jpeg',
+      base64: await lerBase64(arq),
+      miniatura,
+      original: true
+    };
+  }
+
+  const [w,h] = medidas(img.width, img.height, LADO_MAXIMO);
   return {
     mime:'image/jpeg',
-    base64: desenhaEmCanvas(img, w, h, 0.84),
-    miniatura: desenhaEmCanvas(img, mw, mh, 0.6)
+    base64: desenhaEmCanvas(img, w, h, QUALIDADE_ALTA),
+    miniatura
   };
 }
 
@@ -1621,9 +1873,9 @@ function carregarImagem(arq){
 }
 
 /* ---------- VISUALIZADOR ---------- */
-async function urlArquivo(id){
+async function urlArquivo(id, paraExportar){
   if(S.cacheArquivo[id]) return S.cacheArquivo[id].url;
-  const a = await api('baixarArquivo',{id});
+  const a = await api('baixarArquivo', paraExportar ? {id, exportar:true} : {id});
   const bytes = b64Bytes(a.dados);
   const blob = new Blob([bytes], {type:a.mimeType});
   const url = URL.createObjectURL(blob);
@@ -1650,7 +1902,7 @@ async function verDocumento(id){
     <div class="visor-topo">
       <div><b>${esc(d.tipo)} · ${compBonita(d.competencia)}</b><br><small>${esc(S.docsFunc.nome)} · ${esc(d.arquivoNome)}</small></div>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn sec" id="vPdf">Exportar PDF</button>
+        ${podeAprovar()?'<button class="btn sec" id="vPdf">Exportar PDF</button>':''}
         <button class="btn sec" id="vFechar">Fechar</button>
       </div>
     </div>
@@ -1659,7 +1911,8 @@ async function verDocumento(id){
     </div>`;
   document.body.appendChild(v);
   v.querySelector('#vFechar').onclick = ()=>v.remove();
-  v.querySelector('#vPdf').onclick = ()=>exportarPdf([d], S.docsFunc);
+  const bvp = v.querySelector('#vPdf');
+  if(bvp) bvp.onclick = ()=>exportarPdf([d], S.docsFunc);
   document.addEventListener('keydown', function f(e){
     if(e.key==='Escape'){ v.remove(); document.removeEventListener('keydown', f); }
   });
@@ -1676,11 +1929,12 @@ async function exportarPdf(docs, func, tudo){
     const fonteB = await saida.embedFont(StandardFonts.HelveticaBold);
     const logo = await saida.embedPng(b64Bytes(LOGO_ESCURA));
 
+    const naoConvertidos = [];
     docs = docs.slice().sort((a,b)=>
       a.competencia===b.competencia ? a.tipo.localeCompare(b.tipo) : a.competencia.localeCompare(b.competencia));
 
     for(const d of docs){
-      await urlArquivo(d.id);
+      await urlArquivo(d.id, true);
       const {bytes, mime} = S.cacheArquivo[d.id];
       if(mime==='application/pdf'){
         try{
@@ -1690,7 +1944,14 @@ async function exportarPdf(docs, func, tudo){
           continue;
         }catch(e){ /* PDF ilegível: segue para a próxima */ continue; }
       }
-      const img = mime==='image/png' ? await saida.embedPng(bytes) : await saida.embedJpg(bytes);
+      let img;
+      try{
+        img = mime==='image/png' ? await saida.embedPng(bytes) : await saida.embedJpg(bytes);
+      }catch(erro){
+        /* formato que o PDF não embute (webp, heic): fica de fora e é avisado */
+        naoConvertidos.push(d.tipo+' '+compBonita(d.competencia));
+        continue;
+      }
       const L=595.28, A=841.89, margem=32, topo=104;
       const pg = saida.addPage([L,A]);
       const logoH = 17, logoW = logo.width*logoH/logo.height;
@@ -1706,17 +1967,23 @@ async function exportarPdf(docs, func, tudo){
 
     if(!saida.getPageCount()) throw new Error('Nenhum documento pôde ser convertido.');
     const bytes = await saida.save();
+    /* O arquivo sai com o nome do documento e a competência: HOLERITE 08-2026.pdf.
+       A barra não é aceita em nome de arquivo, por isso 08-2026 no lugar de 08/2026. */
+    const tipos = [...new Set(docs.map(d=>d.tipo))];
+    const comps = [...new Set(docs.map(d=>d.competencia))];
     let nome;
-    if(docs.length===1){
-      nome = docs[0].tipo+' '+compArquivo(docs[0].competencia)+'.pdf';
+    if(tipos.length===1 && comps.length===1){
+      nome = tipos[0]+' '+compArquivo(comps[0])+'.pdf';
     }else if(tudo){
       nome = func.nome+' - DOCUMENTOS.pdf';
     }else{
-      const comps = [...new Set(docs.map(d=>d.competencia))];
       nome = func.nome+' - DOCUMENTOS'+(comps.length===1?' '+compArquivo(comps[0]):'')+'.pdf';
     }
+    nome = nome.replace(/[\\\/:*?"<>|]/g,'-');
     baixar(new Blob([bytes],{type:'application/pdf'}), nome);
-    toast('PDF gerado: '+nome);
+    toast('PDF gerado: '+nome +
+      (naoConvertidos.length ? ' · '+naoConvertidos.length+' arquivo(s) em formato não suportado ficaram de fora.' : ''),
+      naoConvertidos.length>0);
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
@@ -3233,15 +3500,19 @@ function telaAnexar(){
 function linhaAnexo(f, tipos){
   const cor = situacao(f);
   const meus = docsDe(f.id, S.competencia);
-  const anexados = tipos.filter(t=>meus.find(d=>d.tipo===t)).length;
+  const anexados = tipos.filter(t=>meus.some(d=>d.tipo===t)).length;
   const pills = tipos.map(t=>{
-    const d = meus.find(x=>x.tipo===t);
-    const estado = !d ? 'falta' : d.status==='APROVADO' ? 'aprovado' : 'anexado';
-    return `<span class="pill ${estado}">${esc(t)}</span>`;
+    const g = meus.filter(x=>x.tipo===t);
+    const estado = !g.length ? 'falta'
+      : g.every(d=>d.status==='APROVADO') ? 'aprovado' : 'anexado';
+    return `<span class="pill ${estado}">${esc(t)}${g.length>1?' ·'+g.length:''}</span>`;
   }).join('')
   /* opcionais só aparecem depois de anexados, e nunca em vermelho */
-  + meus.filter(d=>!tipos.includes(d.tipo))
-        .map(d=>`<span class="pill opcional">${esc(d.tipo)}</span>`).join('');
+  + [...new Set(meus.filter(d=>!tipos.includes(d.tipo)).map(d=>d.tipo))]
+        .map(t=>{
+          const n = meus.filter(d=>d.tipo===t).length;
+          return `<span class="pill opcional">${esc(t)}${n>1?' ·'+n:''}</span>`;
+        }).join('');
   return `
   <div class="linha-anexo" data-docs="${f.id}">
     <div class="marcador m-${cor}"></div>
