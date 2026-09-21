@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.20c';
+  const VERSAO_APP = '2026.09.21';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -590,6 +590,11 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
   place-items:center;backdrop-filter:blur(1px);
 }
 #carregando.on{display:grid}
+.progresso-txt{
+  position:absolute;left:50%;top:calc(50% + 28px);transform:translateX(-50%);
+  background:var(--tinta);color:#fff;font-size:12.5px;font-weight:600;
+  padding:6px 12px;border-radius:2px;white-space:nowrap;letter-spacing:.02em;
+}
 .giro{width:26px;height:26px;border:2px solid var(--linha-forte);border-top-color:var(--tinta);border-radius:50%;animation:g .7s linear infinite}
 @keyframes g{to{transform:rotate(360deg)}}
 
@@ -776,7 +781,27 @@ function estadoParado(){
 window.addEventListener('offline', ()=>mostrarEstado('fora','Offline'));
 window.addEventListener('online', ()=>{ mostrarEstado('','Online'); });
 
-async function api(acao, dados={}){
+/* Mostra o andamento de uma tarefa longa em cima do véu de carregamento. */
+function progresso(texto){
+  const cx = document.getElementById('carregando');
+  if(!cx) return;
+  let r = document.getElementById('progressoTexto');
+  if(texto==null){
+    if(r) r.remove();
+    cx.classList.remove('on');
+    return;
+  }
+  if(!r){
+    r = document.createElement('div');
+    r.id = 'progressoTexto';
+    r.className = 'progresso-txt';
+    cx.appendChild(r);
+  }
+  r.textContent = texto;
+  cx.classList.add('on');
+}
+
+async function api(acao, dados={}, op={}){
   if(API.indexOf('COLE_AQUI')===0){
     throw new Error('Cole a URL do Apps Script na constante API, no topo do arquivo.');
   }
@@ -786,7 +811,8 @@ async function api(acao, dados={}){
   }
   const escrita = ESCRITAS.test(acao);
   chamadasAbertas++;
-  mostrarEstado('trabalhando', escrita ? 'Salvando…' : 'Carregando…');
+  if(!op.silencioso) mostrarEstado('trabalhando', escrita ? 'Salvando…' : 'Carregando…');
+  else mostrarEstado('trabalhando','Salvando…');
   const corpo = Object.assign({acao, usuario:S.usuario, senha:S.senha}, dados);
   try{
     const r = await fetch(API, {
@@ -794,7 +820,35 @@ async function api(acao, dados={}){
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify(corpo)
     });
-    const j = await r.json();
+
+    /* O Apps Script às vezes responde uma página HTML em vez de JSON: tela de
+       login do Google, erro de permissão da implantação ou arquivo grande
+       demais. Traduzir isso, senão o navegador só mostra "Unexpected token '<'". */
+    const texto = await r.text();
+    let j;
+    try{
+      j = JSON.parse(texto);
+    }catch(err){
+      const html = texto.trim().slice(0,400).toLowerCase();
+      if(html.indexOf('accounts.google') >= 0 || html.indexOf('sign in') >= 0 ||
+         html.indexOf('fazer login') >= 0 || html.indexOf('autoriza') >= 0){
+        throw new Error('A publicação do Apps Script está pedindo login. '+
+          'Em Implantar → Gerenciar implantações, mude "Quem pode acessar" para '+
+          '"Qualquer pessoa" e salve como nova versão.');
+      }
+      if(r.status === 413 || html.indexOf('too large') >= 0 || html.indexOf('request entity') >= 0){
+        throw new Error('O arquivo é grande demais para o envio. '+
+          'Tire a foto de novo com resolução menor ou envie em PDF.');
+      }
+      if(html.indexOf('temporarily unavailable') >= 0 || html.indexOf('quota') >= 0 ||
+         html.indexOf('exceeded') >= 0){
+        throw new Error('O Google bloqueou o envio por excesso de uso no momento. '+
+          'Espere alguns minutos e tente de novo — nada foi perdido.');
+      }
+      throw new Error('O servidor respondeu uma página de erro em vez dos dados '+
+        '(HTTP '+r.status+'). Isso costuma ser a implantação do Apps Script '+
+        'desatualizada: publique como nova versão e tente de novo.');
+    }
     if(!j.ok) throw new Error(j.erro||'Erro no servidor.');
     chamadasAbertas--;
     if(!chamadasAbertas && escrita){
@@ -805,8 +859,15 @@ async function api(acao, dados={}){
   }catch(e){
     chamadasAbertas--;
     if(e instanceof TypeError){        /* falha de rede, não do servidor */
+      /* conexão de loja oscila: uma segunda tentativa resolve a maioria das quedas */
+      const tentativa = (op.tentativa || 0) + 1;
+      if(tentativa <= 2){
+        await new Promise(r=>setTimeout(r, 1200*tentativa));
+        return api(acao, dados, Object.assign({}, op, {tentativa}));
+      }
       mostrarEstado('fora','Sem conexão');
-      throw new Error('Não consegui falar com a nuvem. Verifique a internet e tente de novo.');
+      throw new Error('Não consegui falar com a nuvem depois de 3 tentativas. '+
+                      'Verifique a internet — nada foi perdido.');
     }
     estadoParado();
     throw e;
@@ -1747,39 +1808,63 @@ function ligarHistorico(el){
 }
 
 /* ---------- UPLOAD ---------- */
+/* Envia vários arquivos ao mesmo tempo. Um a um, cada foto espera a anterior
+   terminar; em paralelo a banda da loja é aproveitada inteira. Três de cada vez
+   é o limite seguro para o Apps Script. */
+const ENVIOS_SIMULTANEOS = 3;
+
+async function emParalelo(itens, limite, tarefa){
+  const fila = itens.map((item, i)=>({item, i}));
+  const erros = [];
+  let feitos = 0;
+  async function trabalhador(){
+    while(fila.length){
+      const {item, i} = fila.shift();
+      try{ await tarefa(item, i); }
+      catch(e){ erros.push(e); }
+      feitos++;
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(limite, itens.length)}, trabalhador));
+  return {feitos, erros};
+}
+
 function anexar(el, tipo){
   const inp = document.createElement('input');
   inp.type='file'; inp.accept='image/*,application/pdf'; inp.multiple = true;
   inp.onchange = async ()=>{
     const arquivos = [...inp.files];
     if(!arquivos.length) return;
-    carregando(true);
-    let enviados = 0;
-    try{
-      let reduzidos = 0;
-      for(const arq of arquivos){
-        const pronto = await prepararArquivo(arq);
-        if(!pronto.original && arq.type && arq.type.indexOf('image')===0) reduzidos++;
-        const doc = await api('enviarDocumento', {
-          funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
-          mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
-        });
-        doc.miniatura = pronto.miniatura;
-        /* o servidor já devolveu o documento salvo: soma em memória
-           em vez de baixar a lista toda de novo */
-        S.docsLista.push(doc);
-        enviados++;
-      }
-      sincronizarDocs(); desenharDocs(el); desenhar();
-      toast((enviados>1
+
+    const total = arquivos.length;
+    let prontos = 0, enviados = 0;
+    const passo = ()=> progresso(total>1
+      ? 'Enviando '+(prontos)+'/'+total+'…'
+      : 'Enviando documento…');
+    passo();
+
+    const {erros} = await emParalelo(arquivos, ENVIOS_SIMULTANEOS, async (arq)=>{
+      const pronto = await prepararArquivo(arq);
+      const doc = await api('enviarDocumento', {
+        funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
+        mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
+      }, {silencioso:true});
+      doc.miniatura = pronto.miniatura;
+      /* o servidor já devolveu o documento salvo: soma em memória
+         em vez de baixar a lista toda de novo */
+      S.docsLista.push(doc);
+      enviados++; prontos++; passo();
+    });
+
+    progresso(null);
+    if(enviados){ sincronizarDocs(); desenharDocs(el); desenhar(); }
+    if(erros.length){
+      toast(erros[0].message + (enviados ? ' · '+enviados+' de '+total+' foram enviados.' : ''), true);
+    }else{
+      toast(enviados>1
         ? enviados+' arquivos anexados em '+tipo+' de '+compBonita(S.competencia)+'.'
-        : tipo+' de '+compBonita(S.competencia)+' anexado.')
-        + (reduzidos ? ' '+reduzidos+' foto(s) acima de 12 MB foram reduzidas.' : ''));
-    }catch(e){
-      if(enviados){ sincronizarDocs(); desenharDocs(el); desenhar(); }
-      toast(e.message,true);
+        : tipo+' de '+compBonita(S.competencia)+' anexado.');
     }
-    finally{ carregando(false); }
   };
   inp.click();
 }
@@ -1801,15 +1886,23 @@ function medidas(w, h, max){
 /* Gera o arquivo que vai para o Drive e, junto, uma miniatura leve.
    A miniatura fica guardada na planilha e volta com a lista de documentos,
    então a tela abre sem baixar as imagens grandes uma a uma. */
-/* Estes documentos podem virar prova em processo trabalhista, então a foto
-   original é guardada sem recompressão sempre que couber no envio. Só arquivos
-   muito grandes são reduzidos, e ainda assim em alta resolução. */
-const LIMITE_ORIGINAL = 12 * 1024 * 1024;   /* 12 MB */
-const LADO_MAXIMO     = 3200;                /* px, quando precisa reduzir */
-const QUALIDADE_ALTA  = 0.94;
+/* Estes documentos podem virar prova em processo trabalhista, então a foto é
+   guardada em resolução de digitalização judicial: 2400px no lado maior equivale
+   a ~205 DPI numa folha A4, acima do mínimo de 200 DPI dos padrões do PJe, e o
+   texto fica indistinguível do original. Guardar o arquivo cru da câmera não
+   acrescenta legibilidade e multiplica por 3 o tempo de envio na loja. */
+const LADO_MAXIMO    = 2400;
+const QUALIDADE_ALTA = 0.92;
+
+/* Acima disso o Apps Script devolve página de erro em vez de gravar. */
+const TETO_ENVIO = 25 * 1024 * 1024;
 
 async function prepararArquivo(arq){
   if(arq.type==='application/pdf'){
+    if(arq.size > TETO_ENVIO){
+      throw new Error('O PDF "'+arq.name+'" tem '+(arq.size/1024/1024).toFixed(0)+
+        ' MB e não cabe no envio. Divida o arquivo ou reduza a resolução.');
+    }
     const base64 = await lerBase64(arq);
     let miniatura = '';
     try{ miniatura = await miniaturaDoPdf(await arq.arrayBuffer()); }catch(e){}
@@ -1823,22 +1916,23 @@ async function prepararArquivo(arq){
     miniatura = desenhaEmCanvas(img, mw, mh, 0.6);
   }catch(e){ /* formato que o navegador não abre: sobe do jeito que veio */ }
 
-  /* arquivo dentro do limite, ou que não dá para reprocessar: vai como veio */
-  if(!img || arq.size <= LIMITE_ORIGINAL){
-    return {
-      mime: arq.type || 'image/jpeg',
-      base64: await lerBase64(arq),
-      miniatura,
-      original: true
-    };
+  /* formato que não dá para reprocessar: vai como veio */
+  if(!img){
+    if(arq.size > TETO_ENVIO){
+      throw new Error('O arquivo "'+arq.name+'" tem '+(arq.size/1024/1024).toFixed(0)+
+        ' MB e o navegador não consegue reduzi-lo. Converta para JPG ou PDF.');
+    }
+    return {mime: arq.type || 'image/jpeg', base64: await lerBase64(arq), miniatura, original:true};
   }
 
   const [w,h] = medidas(img.width, img.height, LADO_MAXIMO);
-  return {
-    mime:'image/jpeg',
-    base64: desenhaEmCanvas(img, w, h, QUALIDADE_ALTA),
-    miniatura
-  };
+  const reduzida = desenhaEmCanvas(img, w, h, QUALIDADE_ALTA);
+
+  /* se o original já é menor que a versão tratada, não faz sentido recomprimir */
+  if(arq.size <= reduzida.length * 0.75){
+    return {mime: arq.type || 'image/jpeg', base64: await lerBase64(arq), miniatura, original:true};
+  }
+  return {mime:'image/jpeg', base64: reduzida, miniatura};
 }
 
 async function miniaturaDoPdf(buffer){
