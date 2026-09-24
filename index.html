@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.21';
+  const VERSAO_APP = '2026.09.24b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -345,7 +345,7 @@ table.lista tr:last-child td{border-bottom:none}
 /* ---------- LISTA COMPACTA DE FUNCIONÁRIOS ---------- */
 .rolagem{overflow-x:auto}
 /* rola na horizontal e na vertical: é o que permite congelar o cabeçalho */
-.rolagem-alta{overflow:auto;max-height:calc(100vh - 250px);min-height:260px}
+.rolagem-alta{overflow:auto;max-height:calc(100vh - 250px);min-height:240px}
 .espaco-filial td{height:12px;padding:0;border:none;background:var(--papel)}
 .tab-func{width:100%;border-collapse:collapse;font-size:13px;min-width:1080px}
 .tab-func th{
@@ -367,6 +367,8 @@ table.lista tr:last-child td{border-bottom:none}
 .tab-func .d-falta{color:var(--ambar);font-style:italic}
 .tab-func .selo{padding:2px 6px}
 .tab-func .btn.mini{padding:4px 9px;font-size:11.5px}
+.btn.btn-x{color:var(--vermelho);border-color:rgba(200,54,43,.3)}
+.btn.btn-x:hover{background:var(--vermelho);color:#fff;border-color:var(--vermelho)}
 .bolinha{
   display:inline-block;width:7px;height:7px;border-radius:50%;
   margin-right:8px;vertical-align:1px;flex:none;
@@ -399,8 +401,13 @@ table.lista tr:last-child td{border-bottom:none}
 }
 .tab-folha tr.cab-filial td.mono{text-align:right;letter-spacing:0;font-size:12px}
 .tab-folha tbody tr.cab-filial:hover{background:#eef1f5}
-.tab-folha tfoot td{background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px;text-align:right}
+.tab-folha tfoot td{
+  position:sticky;bottom:0;z-index:2;
+  background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px;text-align:right;
+}
 .tab-folha tfoot td:first-child{text-align:left}
+/* o cabeçalho de filial rola junto, mas passa por baixo do cabeçalho da tabela */
+.tab-folha tr.cab-filial td{z-index:1}
 .cel-folha{padding:4px 7px;font-size:13px;width:100%;min-width:78px}
 .cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-folha.numero{min-width:58px}
@@ -1038,6 +1045,7 @@ function desenhar(){
   else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   ligarEventos();
+  ajustarRolagem();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='COMISSOES') ligarComissoes();
@@ -1139,50 +1147,63 @@ function linhaFuncionario(f){
     <td>${selo(f.status)}</td>
     <td style="white-space:nowrap"><button class="btn sec mini" data-docs="${f.id}">Documentos</button>${
       podeAprovar()?` <button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}</td>
-    <td><button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button></td>
+    <td style="white-space:nowrap">
+      <button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+      ${ehMaster()?`<button class="btn sec mini btn-x" data-excluir-func="${f.id}"
+         title="Excluir funcionário" aria-label="Excluir funcionário">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>`:''}
+    </td>
     <td class="t-obs" title="${esc(f.observacoes||'')}">${esc(f.observacoes||'')}</td>
   </tr>`;
 }
 
 /* ---------- ABA 2: EX-FUNCIONÁRIOS ---------- */
 function telaEx(){
-  const ex = filtrar(S.funcionarios.filter(f=>f.status==='DEMITIDO'));
+  const ex = filtrar(S.funcionarios.filter(f=>f.status==='DEMITIDO'))
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
   let html = barraFiltros(false);
   if(!ex.length) return html + vazio('Nenhum ex-funcionário',
     'Ao alterar o status de alguém para Demitido, o nome aparece aqui.');
 
-  /* agrupado por filial; dentro de cada uma, em ordem alfabética */
-  const grupos = {};
-  ex.forEach(f=>{ (grupos[f.filial||'SEM FILIAL'] = grupos[f.filial||'SEM FILIAL']||[]).push(f); });
-  const filiais = Object.keys(grupos).sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
+  html += `<div class="aviso info">${ex.length} ${ex.length===1?'ex-funcionário':'ex-funcionários'},
+    agrupados por filial e em ordem alfabética.</div>`;
 
-  filiais.forEach(fil=>{
-    const lista = grupos[fil].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
-    html += `
-    <section class="filial">
-      <div class="filial-topo">
-        <div>
-          <div class="filial-nome">${esc(fil)}</div>
-          <div class="filial-qtd">${lista.length} ${lista.length===1?'ex-funcionário':'ex-funcionários'} em ordem alfabética</div>
-        </div>
-      </div>
-      ${lista.map(f=>`
-      <div class="linha-func">
-        <div class="marcador m-neutro"></div>
-        <div class="nome c-neutro">${esc(f.nome)}<small>Admissão ${dataBonita(f.dataAdmissao)} · Demissão ${dataBonita(f.dataDemissao)}</small></div>
-        <div class="cel esconde-mob">${esc(f.filial)}</div>
-        <div class="cel mono esconde-mob">${dataBonita(f.dataDemissao)}</div>
-        <div class="esconde-mob">${selo('DEMITIDO')}</div>
-        <div class="acoes">
-          <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
-          ${podeAprovar()?`<button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}
-          <button class="btn sec mini" data-editar="${f.id}">Editar</button>
-        </div>
-      </div>`).join('')}
-    </section>`;
-  });
+  let filialAnterior = null;
+  const corpo = ex.map(f=>{
+    const espaco = (filialAnterior !== null && f.filial !== filialAnterior)
+      ? '<tr class="espaco-filial"><td colspan="8"></td></tr>' : '';
+    filialAnterior = f.filial;
+    return espaco + `<tr>
+      <td class="t-filial">${esc(f.filial||'—')}</td>
+      <td class="t-nome">${esc(f.nome)}</td>
+      <td class="t-apagado">${esc(f.cargo||'—')}</td>
+      <td class="mono">${dataBonita(f.dataAdmissao)}</td>
+      <td class="mono">${dataBonita(f.dataDemissao)}</td>
+      <td class="t-banco mono" title="${esc(f.cpf?'CPF '+f.cpf:'')}">${bancoResumido(f)}</td>
+      <td>${selo('DEMITIDO')}</td>
+      <td style="white-space:nowrap;text-align:right">
+        <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
+        ${podeAprovar()?`<button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}
+        <button class="btn sec mini" data-editar="${f.id}" title="Editar cadastro" aria-label="Editar cadastro">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+        ${ehMaster()?`<button class="btn sec mini btn-x" data-excluir-func="${f.id}"
+           title="Excluir ex-funcionário" aria-label="Excluir ex-funcionário">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
+    <table class="tab-func"><thead><tr>
+      <th>Filial</th><th>Ex-funcionário</th><th>Cargo</th><th>Admissão</th><th>Demissão</th>
+      <th>Dados bancários</th><th>Situação</th><th></th>
+    </tr></thead><tbody>${corpo}</tbody></table></div></div>`;
   return html;
 }
 
@@ -1244,6 +1265,22 @@ function detalhePendencia(fil, lista, tipos){
     </div></td></tr>`;
 }
 
+/* A área de rolagem vai do topo da tabela até a base da janela. Calculada no
+   CSS por um valor fixo, ela ultrapassava a tela quando a barra de filtros
+   crescia e escondia a linha de totais. */
+function ajustarRolagem(){
+  document.querySelectorAll('.rolagem-alta').forEach(cx=>{
+    const topo = cx.getBoundingClientRect().top + window.scrollY;
+    const alturaUtil = window.innerHeight - topo + window.scrollY - 18;
+    cx.style.maxHeight = Math.max(240, alturaUtil) + 'px';
+  });
+}
+let _redimensionando;
+window.addEventListener('resize', ()=>{
+  clearTimeout(_redimensionando);
+  _redimensionando = setTimeout(ajustarRolagem, 120);
+});
+
 function vazio(t,s){ return `<div class="filial"><div class="vazio"><b>${esc(t)}</b>${esc(s)}</div></div>`; }
 
 function ligarEventos(){
@@ -1274,6 +1311,9 @@ function ligarEventos(){
     desenhar();
   });
   document.querySelectorAll('[data-editar]').forEach(b=> b.onclick = ()=>abrirFuncionario(b.dataset.editar));
+  document.querySelectorAll('[data-excluir-func]').forEach(b=> b.onclick = e=>{
+    e.stopPropagation(); confirmarExclusao(b.dataset.excluirFunc);
+  });
 }
 
 /* ==================================================================
@@ -1296,6 +1336,63 @@ function modal(html, larga){
 /* ==================================================================
    CADASTRO DE FUNCIONÁRIO
    ================================================================== */
+/* Excluir apaga também os documentos no Drive, que podem ser prova em processo.
+   Por isso pede o nome digitado em vez de um "OK" — e lembra que demitir
+   preserva o histórico. */
+function confirmarExclusao(funcId){
+  const f = S.funcionarios.find(x=>x.id===funcId);
+  if(!f) return;
+  const qtd = S.documentos.filter(d=>d.funcionarioId===f.id).length;
+
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Esta ação não pode ser desfeita</small><h2>Excluir ${esc(f.nome)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo">
+      <div class="aviso erro">
+        Excluir apaga o cadastro <b>e a pasta do funcionário no Google Drive</b>, com todos
+        os documentos já anexados${qtd?` (${qtd} ${qtd===1?'documento':'documentos'} na competência aberta)`:''}.
+        Esses arquivos podem ser necessários em reclamatória trabalhista.
+      </div>
+      ${f.status!=='DEMITIDO' ? `<div class="aviso info">
+        Se a pessoa saiu da empresa, o certo é mudar a situação para <b>Demitido</b>:
+        ela passa para Ex-funcionários e todo o histórico fica preservado.
+      </div>` : ''}
+      <label class="campo-lbl" for="confNome">Para confirmar, digite o primeiro nome: <b>${esc(f.nome.split(' ')[0])}</b></label>
+      <input class="entrada" id="confNome" autocomplete="off" spellcheck="false" placeholder="${esc(f.nome.split(' ')[0])}">
+      <div id="confErro"></div>
+    </div>
+    <div class="modal-pe">
+      ${f.status!=='DEMITIDO'?'<button class="btn sec" id="confDemitir" style="margin-right:auto">Marcar como demitido</button>':'<span style="margin-right:auto"></span>'}
+      <button class="btn sec" id="confCancelar">Cancelar</button>
+      <button class="btn perigo" id="confOk" disabled>Excluir definitivamente</button>
+    </div>`);
+
+  const q = x => el.querySelector(x);
+  const esperado = f.nome.split(' ')[0].toUpperCase();
+  q('#confNome').oninput = ()=>{
+    q('#confOk').disabled = q('#confNome').value.trim().toUpperCase() !== esperado;
+  };
+  q('#confNome').focus();
+  q('#confCancelar').onclick = ()=>el.remove();
+
+  const dem = q('#confDemitir');
+  if(dem) dem.onclick = ()=>{ el.remove(); abrirFuncionario(funcId); };
+
+  q('#confOk').onclick = async ()=>{
+    carregando(true);
+    try{
+      await api('excluirFuncionario',{id:funcId});
+      el.remove();
+      await recarregar();
+      toast(f.nome+' foi excluído.');
+    }catch(e){ toast(e.message,true); }
+    finally{ carregando(false); }
+  };
+  return el;
+}
+
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
@@ -1417,12 +1514,7 @@ function abrirFuncionario(id, extra){
   };
 
   const ex = el.querySelector('#fExcluir');
-  if(ex) ex.onclick = async ()=>{
-    if(!confirm('Excluir '+f.nome+' e todos os documentos dele no Drive? Esta ação não pode ser desfeita.')) return;
-    carregando(true);
-    try{ await api('excluirFuncionario',{id}); el.remove(); await recarregar(); toast('Funcionário excluído.'); }
-    catch(e){ toast(e.message,true); } finally{ carregando(false); }
-  };
+  if(ex) ex.onclick = ()=>{ el.remove(); confirmarExclusao(id); };
 }
 
 /* ==================================================================
@@ -2364,7 +2456,7 @@ function telaComissoes(){
 
   if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
 
-  html += `<div class="painel" style="padding:0"><div class="rolagem">
+  html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
     <table class="tab-folha"><thead><tr>
       <th>Funcionário</th><th>Filial</th><th style="width:120px">Meta diária</th>
       <th style="width:110px">Dias batidos</th><th style="width:130px">Total do mês</th><th style="width:130px"></th>
@@ -2607,7 +2699,7 @@ function telaQuebras(){
 
   if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
 
-  html += `<div class="painel" style="padding:0"><div class="rolagem">
+  html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
     <table class="tab-folha"><thead><tr>
       <th>Funcionário</th><th>Filial</th><th style="width:110px">Lançamentos</th>
       <th style="width:120px">Peças</th><th style="width:140px">Total do mês</th><th style="width:110px"></th>
@@ -2883,7 +2975,7 @@ function telaFolha(){
     de valores, no pé desta aba.</div>` : ''}`;
 
   if(lista.length){
-    html += `<div class="painel" style="padding:0"><div class="rolagem">
+    html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
       <table class="tab-folha"><thead><tr>
         <th>Funcionário</th><th>Filial</th><th>VT</th><th>Dias</th><th>Total VT</th>
         <th>VR</th><th>Total VR</th><th>Vale mensal</th><th style="width:104px">Quer vale?</th><th>Observações</th>
