@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.24c';
+  const VERSAO_APP = '2026.09.24d';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -136,6 +136,8 @@ header{
   background:#f6f7f9;border:1px solid var(--linha);color:var(--grafite);
 }
 .icone-btn:hover{background:#eaedf1;color:var(--tinta)}
+.icone-btn.girando svg{animation:girar .8s linear infinite}
+@keyframes girar{to{transform:rotate(360deg)}}
 nav{border-top:1px solid var(--linha)}
 .abas{display:flex;gap:2px;max-width:1360px;margin:0 auto;padding:0 12px;overflow-x:auto}
 .aba{
@@ -646,6 +648,10 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
       </div>
       <div class="estado" id="estado" title="Conexão com a nuvem"><i></i><span>Online</span></div>
       <div class="quem"><b id="quemNome">—</b><small id="quemPapel">—</small></div>
+      <button class="icone-btn" id="btnAtualizar" title="Atualizar o sistema" aria-label="Atualizar o sistema">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+          <path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      </button>
       <button class="icone-btn" id="btnAdmin" title="Configurações" aria-label="Configurações">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <circle cx="12" cy="12" r="3"/>
@@ -720,7 +726,7 @@ const S = {
   config:{diaLimite:'10', tiposObrigatorios:['HOLERITE','VALE','VR','VT','CARTAO PONTO'],
           tiposOpcionais:[]},
   competencia: hojeCompetencia(),
-  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, pendAberta:null,
+  aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, excluidos:[], pendAberta:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
@@ -930,13 +936,45 @@ function prepararTela(){
     recarregar();
   };
   document.getElementById('btnAdmin').onclick = abrirAdmin;
+  document.getElementById('btnAtualizar').onclick = atualizarSistema;
+}
+
+/* Recarrega a página buscando o arquivo novo no servidor. O endereço muda, então
+   nem o navegador nem o GitHub Pages conseguem servir a cópia antiga em cache —
+   é o que o Ctrl+Shift+R tenta fazer, sem depender de o atalho funcionar. */
+async function atualizarSistema(){
+  const btn = document.getElementById('btnAtualizar');
+  if(btn) btn.classList.add('girando');
+  try{
+    /* primeiro busca os dados: se só isso bastar, não recarrega a página */
+    await recarregar();
+    const limpo = location.pathname + location.hash;
+    if(confirm('Dados atualizados.\n\nRecarregar a página para buscar também a versão '+
+               'mais recente do sistema?')){
+      location.replace(location.pathname + '?v=' + Date.now() + location.hash);
+    }
+  }catch(e){
+    if(confirm('Não consegui falar com a nuvem.\n\nRecarregar a página mesmo assim?')){
+      location.replace(location.pathname + '?v=' + Date.now());
+    }
+  }finally{
+    if(btn) btn.classList.remove('girando');
+  }
 }
 
 function aplicarCarga(d){
+  /* resposta incompleta não pode derrubar a tela que já está montada */
+  if(!d || !d.sessao){
+    if(S.sessao) return;
+    throw new Error('A nuvem respondeu sem os dados da sessão. Tente entrar de novo.');
+  }
   S.sessao = d.sessao;
   S.filiais = d.filiais;
   S.usuarios = d.usuarios;
-  S.funcionarios = d.funcionarios;
+  const todos = d.funcionarios || [];
+  S.funcionarios = todos.filter(f=>f.excluido!=='SIM');
+  S.excluidos = todos.filter(f=>f.excluido==='SIM')
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
   S.documentos = d.documentos;
   S.prazos = d.prazos;
   S.versaoServidor = d.versao || '';
@@ -1169,8 +1207,12 @@ function telaEx(){
   if(!ex.length) return html + vazio('Nenhum ex-funcionário',
     'Ao alterar o status de alguém para Demitido, o nome aparece aqui.');
 
-  html += `<div class="aviso info">${ex.length} ${ex.length===1?'ex-funcionário':'ex-funcionários'},
-    agrupados por filial e em ordem alfabética.</div>`;
+  html += `<div class="aviso info" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+    <span>${ex.length} ${ex.length===1?'ex-funcionário':'ex-funcionários'},
+      agrupados por filial e em ordem alfabética.</span>
+    ${podeAprovar() && (S.excluidos||[]).length ? `<button class="link-acao" id="verExcluidos"
+      style="margin-left:auto">${S.excluidos.length} cadastro(s) excluído(s) — ver</button>`:''}
+  </div>`;
 
   let filialAnterior = null;
   const corpo = ex.map(f=>{
@@ -1298,6 +1340,8 @@ function ligarEventos(){
   if(fil) fil.onchange = e=>{ S.filtroFilial = e.target.value; desenhar(); };
   const novo = document.getElementById('btnNovo');
   if(novo) novo.onclick = ()=>abrirFuncionario(null);
+  const vEx = document.getElementById('verExcluidos');
+  if(vEx) vEx.onclick = abrirExcluidos;
   const imp = document.getElementById('btnImportar');
   if(imp) imp.onclick = abrirImportacao;
   document.querySelectorAll('[data-docs]').forEach(b=> b.onclick = e=>{
@@ -1339,6 +1383,60 @@ function modal(html, larga){
 /* Excluir apaga também os documentos no Drive, que podem ser prova em processo.
    Por isso pede o nome digitado em vez de um "OK" — e lembra que demitir
    preserva o histórico. */
+/* Cadastros excluídos: saíram das listas, mas nada foi apagado. */
+function abrirExcluidos(){
+  const lista = S.excluidos || [];
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Fora das listas · arquivos preservados no Drive</small>
+        <h2>Cadastros excluídos</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo" id="exclCorpo"></div>`, true);
+  desenharExcluidos(el);
+  return el;
+}
+
+function desenharExcluidos(el){
+  const lista = S.excluidos || [];
+  const corpo = el.querySelector('#exclCorpo');
+  if(!lista.length){
+    corpo.innerHTML = vazio('Nenhum cadastro excluído',
+      'Os cadastros que você excluir aparecem aqui e podem voltar a qualquer momento.');
+    return;
+  }
+  corpo.innerHTML = `
+    <div class="aviso info">
+      Nada foi apagado: os documentos destas pessoas continuam na pasta do Google Drive.
+      Restaurar devolve o cadastro à lista de onde ele saiu.
+    </div>
+    <div class="previa"><table class="tab-hist"><thead><tr>
+      <th>Nome</th><th style="width:130px">Filial</th><th style="width:110px">Situação</th>
+      <th style="width:170px">Excluído por</th><th style="width:110px"></th>
+    </tr></thead><tbody>
+    ${lista.map(f=>`<tr>
+      <td><b>${esc(f.nome)}</b></td>
+      <td class="t-apagado">${esc(f.filial||'—')}</td>
+      <td>${selo(f.status)}</td>
+      <td style="color:var(--apagado);font-size:12px">${esc(f.excluidoPor||'—')}<br>${esc(f.excluidoEm||'')}</td>
+      <td style="text-align:right"><button class="btn sec mini" data-restaurar="${f.id}">Restaurar</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+
+  el.querySelectorAll('[data-restaurar]').forEach(b=> b.onclick = async ()=>{
+    const f = lista.find(x=>x.id===b.dataset.restaurar);
+    carregando(true);
+    try{
+      await api('restaurarFuncionario',{id:f.id});
+      S.excluidos = S.excluidos.filter(x=>x.id!==f.id);
+      S.funcionarios.push(Object.assign({}, f, {excluido:'', excluidoPor:'', excluidoEm:''}));
+      desenharExcluidos(el); desenhar();
+      toast(f.nome+' voltou para as listas.');
+    }catch(e){ toast(e.message,true); }
+    finally{ carregando(false); }
+  });
+}
+
 function confirmarExclusao(funcId){
   const f = S.funcionarios.find(x=>x.id===funcId);
   if(!f) return;
@@ -1346,14 +1444,15 @@ function confirmarExclusao(funcId){
 
   const el = modal(`
     <div class="modal-topo">
-      <div><small>Esta ação não pode ser desfeita</small><h2>Excluir ${esc(f.nome)}</h2></div>
+      <div><small>O cadastro sai das listas · os arquivos ficam no Drive</small>
+        <h2>Excluir ${esc(f.nome)}</h2></div>
       <button class="fechar" aria-label="Fechar">✕</button>
     </div>
     <div class="modal-corpo">
-      <div class="aviso erro">
-        Excluir apaga o cadastro <b>e a pasta do funcionário no Google Drive</b>, com todos
-        os documentos já anexados${qtd?` (${qtd} ${qtd===1?'documento':'documentos'} na competência aberta)`:''}.
-        Esses arquivos podem ser necessários em reclamatória trabalhista.
+      <div class="aviso info">
+        O cadastro sai das listas do sistema, mas <b>nada é apagado</b>: os documentos
+        ${qtd?`(${qtd} ${qtd===1?'anexo':'anexos'} na competência aberta) `:''}continuam
+        na pasta do Google Drive, e o MASTER ou o RH podem restaurar o cadastro depois.
       </div>
       ${f.status!=='DEMITIDO' ? `<div class="aviso info">
         Se a pessoa saiu da empresa, o certo é mudar a situação para <b>Demitido</b>:
@@ -1366,7 +1465,7 @@ function confirmarExclusao(funcId){
     <div class="modal-pe">
       ${f.status!=='DEMITIDO'?'<button class="btn sec" id="confDemitir" style="margin-right:auto">Marcar como demitido</button>':'<span style="margin-right:auto"></span>'}
       <button class="btn sec" id="confCancelar">Cancelar</button>
-      <button class="btn perigo" id="confOk" disabled>Excluir definitivamente</button>
+      <button class="btn perigo" id="confOk" disabled>Excluir cadastro</button>
     </div>`);
 
   const q = x => el.querySelector(x);
@@ -1383,10 +1482,16 @@ function confirmarExclusao(funcId){
   q('#confOk').onclick = async ()=>{
     carregando(true);
     try{
-      await api('excluirFuncionario',{id:funcId});
+      const r = await api('excluirFuncionario',{id:funcId});
+      /* tira da tela na hora; a recarga depois só confirma */
+      S.funcionarios = S.funcionarios.filter(x=>x.id!==funcId);
+      S.excluidos = [f].concat(S.excluidos||[]);
       el.remove();
-      await recarregar();
-      toast(f.nome+' foi excluído.');
+      desenhar();
+      toast(f.nome+' saiu das listas.' +
+        (r && r.documentos ? ' Os '+r.documentos+' documentos continuam no Drive.'
+                           : ' Os documentos continuam no Drive.'));
+      recarregar().catch(()=>{});
     }catch(e){ toast(e.message,true); }
     finally{ carregando(false); }
   };
