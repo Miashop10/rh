@@ -18,7 +18,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.24d';
+  const VERSAO_APP = '2026.09.24f';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -414,6 +414,9 @@ table.lista tr:last-child td{border-bottom:none}
 .cel-folha.dinheiro,.cel-folha.numero{font-family:'JetBrains Mono',monospace;text-align:right}
 .cel-folha.numero{min-width:58px}
 .cel-folha:focus{background:#fffdf5}
+/* valor herdado do cadastro, ainda não lançado nesta competência */
+.cel-folha.herdado{color:var(--apagado);font-style:italic}
+.cel-folha.herdado:focus{color:var(--tinta);font-style:normal}
 .grade-quebra{
   display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end;
   padding:14px;background:#f6f7f9;border:1px solid var(--linha);border-radius:3px;
@@ -1502,7 +1505,7 @@ function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
                      status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:'',
-                     tipoConta:'CORRENTE', recebeVale:'SIM'},
+                     tipoConta:'CORRENTE', recebeVale:'SIM', grupo:''},
                     (extra && extra.inicial) || {});
   const ops = S.filiais.map(x=>`<option value="${esc(x.nome)}" ${f.filial===x.nome?'selected':''}>${esc(x.nome)}</option>`).join('');
   const el = modal(`
@@ -1557,6 +1560,14 @@ function abrirFuncionario(id, extra){
             <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
             <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
           </select></div>
+        <div class="full">
+          <label class="campo-lbl" for="fGrupo">Grupo de VT e VR</label>
+          <select class="entrada" id="fGrupo">
+            <option value="">Usar o grupo da filial</option>
+            ${S.grupos.map(g=>`<option value="${esc(g.nome)}" ${f.grupo===g.nome?'selected':''}>${esc(g.nome)}</option>`).join('')}
+          </select>
+          <div class="prazo" id="dicaGrupo" style="font-size:12px;color:var(--apagado);margin-top:6px"></div>
+        </div>
         <div class="full" id="boxCnpj"></div>
         <div class="full"><label class="campo-lbl" for="fObs">Observações</label>
           <textarea class="entrada" id="fObs" placeholder="Anotações internas do RH">${esc(f.observacoes)}</textarea></div>
@@ -1579,6 +1590,28 @@ function abrirFuncionario(id, extra){
   };
   el.querySelector('#fFilial').addEventListener('change', mostrarCnpj);
   mostrarCnpj();
+
+  const mostrarGrupo = ()=>{
+    const escolhido = el.querySelector('#fGrupo').value;
+    const fil = S.filiais.find(x=>x.nome===el.querySelector('#fFilial').value);
+    const nome = escolhido || (fil && fil.grupo) || '';
+    const g = S.grupos.find(x=>x.nome===nome);
+    const dica = el.querySelector('#dicaGrupo');
+    if(!dica) return;
+    if(!nome){
+      dica.innerHTML = '<span style="color:var(--ambar)">A filial ainda não tem grupo definido. '+
+        'Defina na aba Folha de pagamento ou escolha um aqui.</span>';
+      return;
+    }
+    dica.innerHTML = g
+      ? (escolhido ? 'Grupo próprio: ' : 'Vem da filial ('+esc(nome)+'): ')+
+        '<b>VT '+esc(g.vtDiario||'—')+(g.vtTipo==='MES'?'/mês':'/dia')+
+        ' · VR '+esc(g.vrDiario||'—')+(g.vrTipo==='MES'?'/mês':'/dia')+'</b>'
+      : 'Grupo '+esc(nome)+' não encontrado.';
+  };
+  el.querySelector('#fGrupo').addEventListener('change', mostrarGrupo);
+  el.querySelector('#fFilial').addEventListener('change', mostrarGrupo);
+  mostrarGrupo();
   el.querySelector('#fCancelar').onclick = ()=>el.remove();
 
   el.querySelector('#fSalvar').onclick = async ()=>{
@@ -1589,6 +1622,7 @@ function abrirFuncionario(id, extra){
       cargo: el.querySelector('#fCargo').value.trim(),
       dataAdmissao: el.querySelector('#fAdm').value,
       dataInicio: el.querySelector('#fIni').value,
+      grupo: el.querySelector('#fGrupo').value,
       cpf: el.querySelector('#fCpf').value.trim(),
       banco: el.querySelector('#fBanco').value.trim(),
       agencia: el.querySelector('#fAgencia').value.trim(),
@@ -3012,19 +3046,37 @@ function grupoDaFilial(nomeFilial){
   return S.grupos.find(g=>g.nome===fil.grupo) || null;
 }
 
+/* O funcionário pode ter um grupo próprio; sem ele, vale o da filial. */
+function grupoDoFuncionario(f){
+  if(f && f.grupo){
+    const g = S.grupos.find(x=>x.nome===f.grupo);
+    if(g) return g;
+  }
+  return grupoDaFilial(f && f.filial);
+}
+
 function linhaFolhaDe(f){
   const l = S.folha.linhas[f.id] || {};
-  const g = grupoDaFilial(f.filial);
-  const vt = l.vtDiario !== undefined && l.vtDiario !== '' ? l.vtDiario : (g ? g.vtDiario : '');
-  const vr = l.vrDiario !== undefined && l.vrDiario !== '' ? l.vrDiario : (g ? g.vrDiario : '');
+  const g = grupoDoFuncionario(f);
+  /* prioridade: lançado neste mês → último valor lançado → tabela do grupo */
+  const vtSalvo = (l.vtDiario !== undefined && l.vtDiario !== '') ? l.vtDiario : '';
+  const vrSalvo = (l.vrDiario !== undefined && l.vrDiario !== '') ? l.vrDiario : '';
+  const vt = vtSalvo || f.vtPadrao || (g ? g.vtDiario : '');
+  const vr = vrSalvo || f.vrPadrao || (g ? g.vrDiario : '');
   const dias = l.dias || '';
+  /* o vale repete todo mês: sem lançamento na competência, usa o do cadastro */
+  const valeSalvo = (l.vale && l.vale !== 'NÃO RECEBE') ? l.vale : '';
+  const vale = valeSalvo || (f.recebeVale==='NAO' ? '' : (f.valePadrao || ''));
   /* grupo com valor fechado do mês não multiplica pelos dias */
   const vtMes = !!(g && g.vtTipo === 'MES');
   const vrMes = !!(g && g.vrTipo === 'MES');
   return {
-    grupo: g ? g.nome : '', tipoLoja: g ? (g.tipoLoja||'RUA') : '',
+    grupo: g ? g.nome : '', grupoProprio: !!(f.grupo && g && g.nome===f.grupo),
+    tipoLoja: g ? (g.tipoLoja||'RUA') : '',
     vtDiario: vt, vrDiario: vr, dias, vtMes, vrMes,
-    vale: l.vale || '', observacoes: l.observacoes || '',
+    vale, observacoes: l.observacoes || '',
+    valeHerdado: !valeSalvo && !!vale,
+    vtHerdado: !vtSalvo && !!vt, vrHerdado: !vrSalvo && !!vr,
     totalVt: vtMes ? valorNum(vt) : valorNum(vt) * valorNum(dias),
     totalVr: vrMes ? valorNum(vr) : valorNum(vr) * valorNum(dias)
   };
@@ -3047,7 +3099,7 @@ function telaFolha(){
   const lista = funcionariosDaFolha();
   const ops = ['<option value="TODAS">Todas as filiais</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
-  const semGrupo = [...new Set(lista.filter(f=>!grupoDaFilial(f.filial)).map(f=>f.filial))];
+  const semGrupo = [...new Set(lista.filter(f=>!grupoDoFuncionario(f)).map(f=>f.filial))];
 
   let html = `
   <div class="barra">
@@ -3072,8 +3124,10 @@ function telaFolha(){
   </div>
   <div class="aviso info">
     Folha de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
-    O VT e o VR vêm do grupo de valores da filial e podem ser ajustados linha a linha.
-    Os totais são o valor diário vezes os dias.
+    <b>Vale, VT e VR</b> repetem o último valor lançado — em cinza itálico quando vêm do
+    mês anterior. Digite por cima para mudar: o novo valor passa a valer dali em diante
+    e os meses já salvos ficam como estão. Sem lançamento nenhum, valem os valores do
+    grupo da filial.
   </div>
   ${semGrupo.length ? `<div class="aviso erro">Sem grupo de valores definido:
     <b>${semGrupo.map(esc).join(', ')}</b>. Defina o grupo de cada filial na tabela
@@ -3089,19 +3143,23 @@ function telaFolha(){
         const d = linhaFolhaDe(f);
         return `<tr>
           <td class="t-nome">${esc(f.nome)}</td>
-          <td class="t-apagado" title="${esc(d.grupo||'sem grupo')}">${esc(f.filial||'—')}</td>
-          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vtDiario"
-                     value="${esc(d.vtDiario)}" title="${d.vtMes?'valor fechado do mês':'valor por dia'}">
+          <td class="t-apagado" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
+          <td><input class="entrada cel-folha dinheiro ${d.vtHerdado?'herdado':''}"
+                     data-f="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
+                     title="${d.vtMes?'valor fechado do mês':'valor por dia'}${d.vtHerdado?' · repetido do mês anterior':''}">
               ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
           <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
                      value="${esc(d.dias)}"></td>
           <td class="mono t-total">${moeda(d.totalVt)}</td>
-          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vrDiario"
-                     value="${esc(d.vrDiario)}" title="${d.vrMes?'valor fechado do mês':'valor por dia'}">
+          <td><input class="entrada cel-folha dinheiro ${d.vrHerdado?'herdado':''}"
+                     data-f="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
+                     title="${d.vrMes?'valor fechado do mês':'valor por dia'}${d.vrHerdado?' · repetido do mês anterior':''}">
               ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
           <td class="mono t-total">${moeda(d.totalVr)}</td>
-          <td><input class="entrada cel-folha dinheiro" data-f="${f.id}" data-campo="vale"
-                     value="${esc(d.vale)}" ${f.recebeVale==='NAO'?'disabled':''}></td>
+          <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
+                     data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
+                     title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
+                     ${f.recebeVale==='NAO'?'disabled':''}></td>
           <td><select class="entrada cel-vale ${f.recebeVale==='NAO'?'nao':''}" data-vale="${f.id}">
             <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
             <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
@@ -3356,18 +3414,32 @@ async function salvarFolha(){
   const lista = funcionariosDaFolha();
   const itens = lista.map(f=>{
     const d = linhaFolhaDe(f);
+    const l = S.folha.linhas[f.id] || {};
     return {
       funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
       vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
       vrDiario:d.vrDiario, totalVr:moeda(d.totalVr),
-      vale: f.recebeVale==='NAO' ? 'NÃO RECEBE' : d.vale, observacoes:d.observacoes
+      vale: f.recebeVale==='NAO' ? '' : d.vale, observacoes:d.observacoes,
+      /* mexer só no VT ou no VR, sem tocar nos dias, também é um lançamento */
+      _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario)
     };
-  }).filter(it=> it.dias || it.vale || it.observacoes);
+  }).filter(it=> it._mexido || it.dias || it.vale || it.observacoes)
+    .map(it=>{ delete it._mexido; return it; });
   if(!itens.length) return toast('Preencha ao menos os dias de alguém antes de salvar.', true);
   carregando(true);
   try{
     const r = await api('salvarFolha', {competencia:S.competencia, itens});
-    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+'.');
+    /* o vale lançado passa a valer para os próximos meses */
+    itens.forEach(it=>{
+      const f = S.funcionarios.find(x=>x.id===it.funcionarioId);
+      if(!f) return;
+      if(it.vale && it.vale !== 'NÃO RECEBE') f.valePadrao = it.vale;
+      if(it.vtDiario) f.vtPadrao = it.vtDiario;
+      if(it.vrDiario) f.vrPadrao = it.vrDiario;
+    });
+    desenhar();
+    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+
+          '. Vale, VT e VR repetem nos próximos meses.');
   }catch(e){ toast(e.message, true); }
   finally{ carregando(false); }
 }
