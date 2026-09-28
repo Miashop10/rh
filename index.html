@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.28';
+  const VERSAO_APP = '2026.09.28b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1052,6 +1052,8 @@ function podeAprovar(){
   return S.sessao && (S.sessao.papel==='MASTER' || S.sessao.papel==='GERENTE_RH');
 }
 function ehMaster(){ return S.sessao && S.sessao.papel==='MASTER'; }
+/* Configurações: o GERENTE RH entra em tudo, menos na senha master. */
+function podeConfigurar(){ return ehMaster() || (S.sessao && S.sessao.papel==='GERENTE_RH'); }
 function podeImportar(){ return podeAprovar(); }
 
 function prazoDaCompetencia(){
@@ -1071,7 +1073,7 @@ function desenhar(){
     S.sessao.papel==='MASTER' ? 'Master'
     : S.sessao.papel==='GERENTE_RH' ? 'Gerente RH'
     : (S.sessao.filial || 'Gerente');
-  document.getElementById('btnAdmin').style.display = ehMaster() ? '' : 'none';
+  document.getElementById('btnAdmin').style.display = podeConfigurar() ? '' : 'none';
 
   const nav = document.getElementById('abas');
   nav.innerHTML = S.sessao.abas.filter(a=>a!=='ADMIN').map(a=>
@@ -2351,7 +2353,7 @@ function baixar(blob, nome){
 function abrirAdmin(){
   const el = modal(`
     <div class="modal-topo">
-      <div><small>Área do master</small><h2>Configurações</h2></div>
+      <div><small>${ehMaster()?'Área do master':'Área do RH'}</small><h2>Configurações</h2></div>
       <button class="fechar" aria-label="Fechar">✕</button>
     </div>
     <div class="modal-corpo">
@@ -2359,7 +2361,7 @@ function abrirAdmin(){
         <button class="sub-aba on" data-sub="filiais">Filiais</button>
         <button class="sub-aba" data-sub="usuarios">Usuários</button>
         <button class="sub-aba" data-sub="prazos">Prazos</button>
-        <button class="sub-aba" data-sub="senha">Senha master</button>
+        ${ehMaster()?'<button class="sub-aba" data-sub="senha">Senha master</button>':''}
       </div>
       <div id="subCorpo"></div>
     </div>`, true);
@@ -2424,8 +2426,8 @@ function subAdmin(el, qual){
       automaticamente as abas que forem criadas depois do cadastro dele.
       Para o gerente de loja, escolha o papel <b>Gerente de filial</b>, informe a filial dele e marque
       só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.<br>
-      As senhas ficam à mostra nesta tela, que só o MASTER abre — evite deixá-la aberta
-      com outras pessoas por perto.</div>
+      As senhas ficam à mostra nesta tela, aberta só pelo MASTER e pelo Gerente RH —
+      evite deixá-la aberta com outras pessoas por perto.</div>
       <table class="lista"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>Abas visíveis</th><th></th></tr></thead><tbody id="tbUsers">
       ${S.usuarios.map(u=>linhaUsuario(u)).join('')}
       ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'ANEXAR', ativo:'SIM'}, true)}
@@ -2464,6 +2466,7 @@ function subAdmin(el, qual){
   }
 
   if(qual==='senha'){
+    if(!ehMaster()){ c.innerHTML = '<div class="aviso">Só o usuário MASTER troca a senha master.</div>'; return; }
     c.innerHTML = `
       <div class="aviso info">A senha master abre todas as abas e todas as filiais. Guarde-a com cuidado.</div>
       <div class="grade">
@@ -2513,7 +2516,7 @@ function linhaUsuario(u, novo){
     <td><select class="entrada" data-u="papel">
       <option value="GERENTE" ${u.papel==='GERENTE'?'selected':''}>Gerente de filial</option>
       <option value="GERENTE_RH" ${u.papel==='GERENTE_RH'?'selected':''}>Gerente RH</option>
-      <option value="MASTER" ${u.papel==='MASTER'?'selected':''}>Master</option>
+      ${ehMaster()||u.papel==='MASTER'?`<option value="MASTER" ${u.papel==='MASTER'?'selected':''}>Master</option>`:''}
     </select></td>
     <td><select class="entrada" data-u="filial">${opsFil}</select></td>
     <td><div class="chips">${chips}
