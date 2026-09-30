@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.30b';
+  const VERSAO_APP = '2026.09.30e';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -4607,6 +4607,8 @@ const DIAS_SEM = 'Seg|Ter|Qua|Qui|Sex|S[áa]b|Dom';
 
 /* Dias que o cartão traz como abonados: não descontam e não contam como falta. */
 const RE_ABONO = /ATESTADO|DECLARA|ABONO/;
+/* O cartão escreve FERIADO, FERIADO MUNICIPAL, PONTO FACULTATIVO… */
+const RE_FERIADO = /FERIAD|FACULTATIV/;
 
 function minParaHora(m){
   const sinal = m<0 ? '-' : '';
@@ -4692,15 +4694,25 @@ function extrairCartoes(paginas, nomeArquivo){
     const m = linha.match(reDia);
     if(!m) return;
     const resto = m[3];
-    const tempos = resto.match(/\d{1,2}:\d{2}/g);
-    if(!tempos || tempos.length < 4) return;
+    const tempos = resto.match(/\d{1,2}:\d{2}/g) || [];
     if(atual.dias.some(d=>d.data===m[1])) return;   /* cabeçalho repetido */
-    const marcas = tempos.slice(0, tempos.length-4).map(horaParaMin);
-    const fim = tempos.slice(-4).map(horaParaMin);
+
+    /* Dia de falta costuma vir sem as quatro colunas de totais no fim da
+       linha — às vezes sem hora nenhuma. Antes a linha era descartada e o dia
+       simplesmente sumia da apuração, e com ele a falta. Agora o dia entra
+       mesmo assim, só sem marcação. */
+    const completo = tempos.length >= 4;   /* sem os totais não dá para ler a carga do dia */
+    const marcas = completo ? tempos.slice(0, tempos.length-4).map(horaParaMin) : [];
+    const fim = completo ? tempos.slice(-4).map(horaParaMin) : [];
+    const corte = tempos.length ? resto.indexOf(tempos[0]) : resto.length;
     atual.dias.push({
       data: m[1], semana: m[2],
-      definicao: resto.slice(0, resto.indexOf(tempos[0])).trim(),
-      marcas, ch: fim[0], relDiurno: fim[1], relNoturno: fim[2], relSaldo: fim[3]
+      definicao: resto.slice(0, corte).trim(),
+      marcas, semTotais: !completo,
+      ch: completo ? fim[0] : 0,
+      relDiurno: completo ? fim[1] : 0,
+      relNoturno: completo ? fim[2] : 0,
+      relSaldo: completo ? fim[3] : 0
     });
   });
 
@@ -4731,12 +4743,15 @@ function tolPartes(c){
 }
 
 /* Loja de rua ou de shopping, a partir do grupo da filial. */
+/* Sem inventar padrão: só é loja de rua o grupo marcado como RUA. Grupo em
+   branco, ou filial sem grupo, segue a jornada geral de sábado — senão o
+   shopping, que tem o campo vazio, cairia nas 4 horas da rua. */
 function tipoLojaDaFilial(filial){
   if(!filial) return '';
   const f = (S.filiais||[]).find(x=>x.nome===filial);
   if(!f || !f.grupo) return '';
   const g = (S.grupos||[]).find(x=>x.nome===f.grupo);
-  return g ? (g.tipoLoja || 'RUA') : '';
+  return g ? String(g.tipoLoja || '').toUpperCase().trim() : '';
 }
 
 function calculoPor(id){
@@ -4770,6 +4785,7 @@ function apurar(cartao, cfg, filial){
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
     atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0, diasAbono:0,
+    diasFeriado:0,
     alertas:[], detalhe:[]
   };
 
@@ -4778,17 +4794,9 @@ function apurar(cartao, cfg, filial){
     const folga = defDia==='FOLGA';
     const abonado = RE_ABONO.test(defDia);
     let mc = d.marcas.slice();
-    if(!mc.length){
-      /* sem marcação: falta desconta; folga e abono (atestado, declaração) não */
-      if(abonado) r.diasAbono++; else if(folga) r.diasFolga++; else r.diasFalta++;
-      r.detalhe.push(Object.assign({}, d, {tipo: abonado?'ABONO':folga?'FOLGA':'FALTA',
-        trabalhado:0, extra:0, extraNot:0, atraso:0}));
-      return;
-    }
     if(mc.length % 2){
       r.alertas.push(d.data+': número ímpar de marcações, a última foi ignorada.');
       mc = mc.slice(0,-1);
-      if(!mc.length) return;
     }
     const intervalos = [];
     for(let i=0;i<mc.length;i+=2){
@@ -4797,6 +4805,24 @@ function apurar(cartao, cfg, filial){
       intervalos.push([a,b]);
     }
     const trabalhado = intervalos.reduce((s,[a,b])=>s+(b-a),0);
+
+    /* Dia sem trabalho nenhum é falta — venha sem marcação alguma ou com as
+       batidas zeradas, que é como alguns cartões imprimem a ausência. Não
+       descontam: folga, abono (atestado, declaração) e feriado. Feriado não é
+       falta: não havia jornada a cumprir. O cartão o identifica pela definição
+       ou pela carga horária zerada na própria linha. */
+    const feriadoParado = RE_FERIADO.test(defDia) || (d.ch === 0 && !d.semTotais && !folga);
+    if(trabalhado <= 0){
+      const tipoDia = abonado ? 'ABONO' : folga ? 'FOLGA'
+                    : feriadoParado ? 'FERIADO' : 'FALTA';
+      if(tipoDia === 'ABONO') r.diasAbono++;
+      else if(tipoDia === 'FOLGA') r.diasFolga++;
+      else if(tipoDia === 'FERIADO') r.diasFeriado++;
+      else r.diasFalta++;
+      r.detalhe.push(Object.assign({}, d, {tipo: tipoDia,
+        trabalhado:0, extra:0, extraNot:0, atraso:0}));
+      return;
+    }
     const noturno = intervalos.reduce((s,[a,b])=>s+minutosNoturnos(a,b,notIni,notFim),0);
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
@@ -4989,8 +5015,15 @@ function gradeCartao(op){
       const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
       const folga = el.querySelector(`.m-folga[data-i="${i}"]`).checked;
       const abono = el.querySelector(`.m-abono[data-i="${i}"]`).checked;
+      /* sábado de loja de rua tem jornada própria: a grade precisa mostrar a
+         mesma carga que o cálculo usa, senão a coluna CH sai errada */
+      const filialDoCartao = (S.funcionarios.find(x=>x.id===op.funcionarioId)||{}).filial
+                             || op.filial || '';
+      const sabRua = tipoLojaDaFilial(filialDoCartao) === 'RUA';
       const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada)
-                   : d.sabado ? (cfg.jornadaSabado || cfg.jornada) : cfg.jornada;
+                   : d.sabado ? (sabRua ? (cfg.jornadaSabadoRua || '04:00')
+                                        : (cfg.jornadaSabado || cfg.jornada))
+                   : cfg.jornada;
       const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
       /* folga só vale enquanto não há batida; com batida o dia é trabalho na folga */
       const definicao = abono ? (d.definicaoAbono || 'Abono')
@@ -5025,6 +5058,7 @@ function gradeCartao(op){
       <div><b style="color:var(--vermelho)">${minParaHora(r.atrasos)}</b> atrasos</div>
       <div><b style="color:${r.diasFalta?'var(--vermelho)':'inherit'}">${r.diasFalta}</b> faltas</div>
       <div><b>${r.diasFolga}</b> folgas</div>
+      ${r.diasFeriado?`<div><b>${r.diasFeriado}</b> feriados</div>`:''}
       <div><b>${r.diasAbono}</b> abonos</div>`;
   };
 
@@ -5117,9 +5151,11 @@ function editarResultado(i){
     folga: String(d.definicao||'').toUpperCase() === 'FOLGA',
     abono: RE_ABONO.test(String(d.definicao||'').toUpperCase()),
     definicaoAbono: RE_ABONO.test(String(d.definicao||'').toUpperCase()) ? d.definicao : '',
-    cem: d.ch === 0 ||
+    /* dia sem batida é falta, folga ou abono — nunca feriado trabalhado */
+    cem: !(d.marcas||[]).length ? false :
+      (d.ch === 0 ||
       (!RE_ABONO.test(String(d.definicao||'').toUpperCase()) &&
-       ['DIA NORMAL','FOLGA'].indexOf(String(d.definicao||'').toUpperCase()) < 0)
+       ['DIA NORMAL','FOLGA'].indexOf(String(d.definicao||'').toUpperCase()) < 0))
   }));
   return gradeCartao({
     titulo: r.nome,
@@ -5206,7 +5242,7 @@ function tabelaHoras(){
         <td class="mono" style="color:var(--verde);font-weight:700">${minParaHora(r.ap.he100)}</td>
         <td class="mono">${minParaHora(r.ap.noturno)}</td>
         <td class="mono" style="color:${r.ap.atrasos?'var(--vermelho)':'inherit'}">${minParaHora(r.ap.atrasos)}</td>
-        <td class="mono">${r.ap.diasFalta}${r.ap.diasFolga?` <span style="color:var(--apagado)">+${r.ap.diasFolga} folga</span>`:''}${r.ap.diasAbono?` <span style="color:var(--apagado)">+${r.ap.diasAbono} abono</span>`:''}</td>
+        <td class="mono">${r.ap.diasFalta}${r.ap.diasFolga?` <span style="color:var(--apagado)">+${r.ap.diasFolga} folga</span>`:''}${r.ap.diasAbono?` <span style="color:var(--apagado)">+${r.ap.diasAbono} abono</span>`:''}${r.ap.diasFeriado?` <span style="color:var(--apagado)">+${r.ap.diasFeriado} feriado</span>`:''}</td>
         <td><input class="entrada obs-he" data-obs="${i}" value="${esc(r.observacoes||'')}"
                    placeholder="Anotação"></td>
         <td style="white-space:nowrap;text-align:right">
@@ -5350,6 +5386,7 @@ function detalheHoras(i){
         <div><b style="color:var(--vermelho)">${minParaHora(r.ap.atrasos)}</b> atrasos em ${r.ap.diasAtraso} dia(s)</div>
         <div><b style="color:${r.ap.diasFalta?'var(--vermelho)':'inherit'}">${r.ap.diasFalta}</b> faltas</div>
         <div><b>${r.ap.diasFolga||0}</b> folgas</div>
+        ${r.ap.diasFeriado?`<div><b>${r.ap.diasFeriado}</b> feriados</div>`:''}
         <div><b>${r.ap.diasAbono||0}</b> abonos (atestado/declaração)</div>
       </div>
       ${r.ap.alertas.length?`<div class="aviso erro">${r.ap.alertas.map(esc).join('<br>')}</div>`:''}
