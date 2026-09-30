@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.28b';
+  const VERSAO_APP = '2026.09.30b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -50,6 +50,8 @@
   --verde:#1c8a54;
   --verde-suave:#e8f5ee;
   --neutro:#8a93a0;
+  --laranja:#d1590a;
+  --laranja-suave:#fce4cf;
   --sombra:0 1px 2px rgba(16,18,21,.06), 0 8px 24px -18px rgba(16,18,21,.5);
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -221,6 +223,7 @@ select.campo,input.campo{
   box-shadow:var(--sombra);margin:auto;
 }
 .modal.larga{max-width:1000px}
+.modal.extra-larga{max-width:1300px}
 .modal-topo{
   display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--linha);
   position:sticky;top:0;background:var(--cartao);z-index:2;border-radius:3px 3px 0 0;
@@ -347,6 +350,14 @@ table.lista tr:last-child td{border-bottom:none}
 .aviso{padding:11px 13px;border-radius:2px;font-size:13px;margin-bottom:14px}
 .aviso.info{background:#eef2f7;color:var(--grafite)}
 .aviso.erro{background:var(--vermelho-suave);color:var(--vermelho)}
+.aviso.opcional{
+  background:var(--ambar-suave);color:#8a5f0b;border-left:3px solid var(--ambar);
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+}
+.aviso.opcional .ponto{
+  width:8px;height:8px;border-radius:50%;background:var(--ambar);flex:none;
+  animation:pulsa 1.4s ease-in-out infinite;
+}
 
 /* ---------- LISTA COMPACTA DE FUNCIONÁRIOS ---------- */
 .rolagem{overflow-x:auto}
@@ -365,6 +376,36 @@ table.lista tr:last-child td{border-bottom:none}
 }
 .tab-func tr:last-child td{border-bottom:none}
 .tab-func tbody tr:hover{background:#fafbfc}
+
+/* ---------- CONTRATO DE EXPERIÊNCIA ----------
+   Faixa na linha inteira, separada da bolinha de documentos: a bolinha diz se
+   os papéis do mês estão em dia, a faixa diz que o contrato ainda está em
+   experiência. Amarela até 29 dias de casa, laranja dos 30 aos 60. */
+/* Aviso prévio manda na faixa: é o prazo mais curto da lista. */
+tr.aviso-previo, .linha-anexo.aviso-previo{background:var(--vermelho-suave)}
+.tab-func tbody tr.aviso-previo:hover{background:#f8dedc}
+tr.aviso-previo td:first-child{box-shadow:inset 3px 0 0 var(--vermelho)}
+.linha-anexo.aviso-previo{box-shadow:inset 0 0 0 1px rgba(200,54,43,.3)}
+tr.exp-1, .linha-anexo.exp-1{background:var(--ambar-suave)}
+tr.exp-2, .linha-anexo.exp-2{background:var(--laranja-suave)}
+.tab-func tbody tr.exp-1:hover{background:#fbeed6}
+.tab-func tbody tr.exp-2:hover{background:#f9dabe}
+tr.exp-1 td:first-child{box-shadow:inset 3px 0 0 var(--ambar)}
+tr.exp-2 td:first-child{box-shadow:inset 3px 0 0 var(--laranja)}
+.linha-anexo.exp-1{box-shadow:inset 0 0 0 1px rgba(201,138,16,.25)}
+.linha-anexo.exp-2{box-shadow:inset 0 0 0 1px rgba(209,89,10,.3)}
+.selo-exp{
+  display:inline-block;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 6px;border-radius:2px;font-weight:700;margin-left:8px;vertical-align:1px;
+}
+.selo-exp.e1{background:var(--ambar);color:#fff}
+.selo-exp.e2{background:var(--laranja);color:#fff}
+.selo-exp.av{background:var(--vermelho);color:#fff}
+/* pisca a linha recém-salva, para o olho reencontrar onde parou */
+@keyframes pisca-linha{0%,100%{box-shadow:inset 0 0 0 9999px transparent}
+  35%{box-shadow:inset 0 0 0 9999px rgba(28,138,84,.16)}}
+.piscando{animation:pisca-linha 1.6s ease-in-out}
+.piscando td{position:relative}
 .tab-func .t-nome{font-weight:600;max-width:290px}
 .tab-func .t-filial{color:var(--grafite);font-weight:600;max-width:130px}
 .tab-func .t-apagado{color:var(--apagado);max-width:150px}
@@ -550,6 +591,7 @@ select.g-campo.sem{color:var(--ambar)}
 .solta b{display:block;margin-bottom:4px}
 .solta small{color:var(--apagado)}
 .previa{max-height:340px;overflow:auto;border:1px solid var(--linha);border-radius:2px}
+.previa table.tab-calc{min-width:1180px}
 .previa table{width:100%;border-collapse:collapse;font-size:13px}
 .previa th{
   position:sticky;top:0;background:#f6f7f9;text-align:left;padding:8px 10px;
@@ -739,6 +781,7 @@ const S = {
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
+  folhaParte:'FOLHA',      /* seção aberta dentro da Folha de pagamento */
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] }
 };
@@ -751,7 +794,6 @@ const ROTULO_ABA = {
   HORAS_EXTRAS:'Horas extras',
   COMISSOES:'Comissões',
   QUEBRAS:'Quebras',
-  CONTABILIDADE:'Contabilidade',
   FOLHA:'Folha de pagamento'
 };
 
@@ -1009,12 +1051,40 @@ async function recarregar(){
   carregando(true);
   try{
     aplicarCarga(await api('carregar', {competencia:S.competencia}));
+    _ultimaCarga = Date.now();
   }catch(e){
     toast(e.message, true);
   }finally{
     carregando(false);
   }
 }
+
+/* A lista de documentos exigidos é decidida pelo RH e usada pelas filiais.
+   Quem já estava com o sistema aberto ficava com a lista velha até apertar
+   atualizar — e então não conseguia anexar o documento novo. Aqui a carga é
+   refeita em silêncio quando a tela volta a ser usada, no máximo uma vez por
+   minuto. Sem giro na tela e sem redesenho se nada mudou. */
+let _ultimaCarga = Date.now();
+let _atualizando = false;
+async function atualizarSilencioso(forcar){
+  if(_atualizando || !S.sessao) return;
+  if(!forcar && Date.now() - _ultimaCarga < 60000) return;
+  _atualizando = true;
+  try{
+    const d = await api('carregar', {competencia:S.competencia});
+    if(!d || !d.sessao) return;
+    const antes = JSON.stringify([S.config, S.filiais.map(f=>f.nome), S.grupos]);
+    aplicarCarga(d);
+    _ultimaCarga = Date.now();
+    const depois = JSON.stringify([S.config, S.filiais.map(f=>f.nome), S.grupos]);
+    if(antes !== depois) toast('Configurações atualizadas pelo RH.');
+  }catch(e){ /* silencioso de propósito: é um reforço, não a via principal */ }
+  finally{ _atualizando = false; }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') atualizarSilencioso();
+});
+window.addEventListener('focus', ()=>atualizarSilencioso());
 
 /* ==================================================================
    REGRA DE COR
@@ -1037,6 +1107,41 @@ function situacao(f){
   return grupos.every(g=>g.every(d=>d.status==='APROVADO')) ? 'verde' : 'ambar';
 }
 
+/* Contrato de experiência. O dia da admissão conta como o 1º dia, como na
+   CLT: 30 dias de contrato terminam em "admissão + 29". Daí a primeira faixa
+   ir até o 29º dia de diferença e a segunda do 30º ao 60º. */
+function experiencia(f){
+  if(!f || !f.dataAdmissao || f.status==='DEMITIDO') return null;
+  const adm = new Date(f.dataAdmissao+'T12:00:00');
+  if(isNaN(adm)) return null;
+  const hoje = new Date();
+  hoje.setHours(12,0,0,0);
+  const dias = Math.floor((hoje - adm)/86400000);
+  if(dias < 0 || dias > 60) return null;
+  return dias <= 29
+    ? {fase:1, dias, rotulo:'Experiência · 1º período', resta:29-dias}
+    : {fase:2, dias, rotulo:'Experiência · 2º período', resta:60-dias};
+}
+/* Qual faixa a linha recebe. Aviso prévio vem primeiro: quem está de saída
+   importa mais do que quem está em experiência, e os dois podem coincidir. */
+function faixaLinha(f){
+  if(!f) return null;
+  if(f.status==='AVISO') return {classe:'aviso-previo', titulo:'Aviso prévio em curso'};
+  const e = experiencia(f);
+  if(e) return {classe:'exp-'+e.fase, titulo:e.rotulo+' · '+(e.dias+1)+'º dia de casa'};
+  return null;
+}
+
+function seloExperiencia(f){
+  const e = experiencia(f);
+  if(!e) return '';
+  const fim = new Date(new Date(f.dataAdmissao+'T12:00:00').getTime()
+    + (e.fase===1?29:60)*86400000);
+  return `<span class="selo-exp e${e.fase}" title="${e.dias+1}º dia de casa · `
+    + `este período vai até ${dataBonita(fim.toISOString().slice(0,10))}">`
+    + (e.fase===1?'EXP 30':'EXP 60') + '</span>';
+}
+
 const SITUACOES = {
   EMPREGADO:{rotulo:'Empregado', classe:'emp'},
   AVISO:    {rotulo:'Aviso prévio', classe:'alerta'},
@@ -1055,6 +1160,79 @@ function ehMaster(){ return S.sessao && S.sessao.papel==='MASTER'; }
 /* Configurações: o GERENTE RH entra em tudo, menos na senha master. */
 function podeConfigurar(){ return ehMaster() || (S.sessao && S.sessao.papel==='GERENTE_RH'); }
 function podeImportar(){ return podeAprovar(); }
+
+/* ==================================================================
+   AVISO DE DOCUMENTO OPCIONAL
+   Opcional não entra na conta de vermelho/amarelo/verde, então antes passava
+   despercebido: a filial anexava um atestado e o RH só via se abrisse o
+   funcionário. Aqui ele aparece no alto da tela até ser conferido — conferir
+   é o que marca como visto.
+   ================================================================== */
+function opcionaisPendentes(){
+  if(!podeAprovar()) return [];
+  const opc = S.config.tiposOpcionais || [];
+  if(!opc.length) return [];
+  const obrig = S.config.tiposObrigatorios || [];
+  const porFunc = {};
+  S.documentos.forEach(d=>{
+    if(d.competencia !== S.competencia) return;
+    if(d.status === 'APROVADO') return;
+    if(obrig.includes(d.tipo)) return;          // obrigatório já tem o semáforo
+    if(!opc.includes(d.tipo)) return;
+    (porFunc[d.funcionarioId] = porFunc[d.funcionarioId] || []).push(d);
+  });
+  return Object.keys(porFunc).map(id=>{
+    const f = S.funcionarios.find(x=>x.id===id) || {id, nome:'(cadastro removido)', filial:''};
+    return {funcionario:f, docs:porFunc[id]};
+  }).sort((a,b)=> (a.funcionario.filial||'').localeCompare(b.funcionario.filial||'','pt-BR')
+                  || (a.funcionario.nome||'').localeCompare(b.funcionario.nome||'','pt-BR'));
+}
+
+function avisoOpcionais(){
+  const lista = opcionaisPendentes();
+  if(!lista.length) return '';
+  const docs = lista.reduce((s,x)=>s+x.docs.length, 0);
+  const tipos = [...new Set(lista.flatMap(x=>x.docs.map(d=>d.tipo)))];
+  return `<div class="aviso opcional" id="avisoOpcional">
+    <span class="ponto"></span>
+    <span>${docs>1
+        ? `<b>${docs}</b> documentos opcionais anexados`
+        : '<b>1</b> documento opcional anexado'} em ${compBonita(S.competencia)}
+      por ${lista.length} funcionário${lista.length>1?'s':''}, ainda sem conferência —
+      ${esc(tipos.slice(0,3).join(', '))}${tipos.length>3?'…':''}.</span>
+    <button class="btn sec mini" id="verOpcionais" style="margin-left:auto">Ver e conferir</button>
+  </div>`;
+}
+
+function abrirOpcionais(){
+  const lista = opcionaisPendentes();
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Competência ${compBonita(S.competencia)}</small>
+        <h2>Documentos opcionais a conferir</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo">
+      <div class="aviso info">Opcionais não entram no vermelho/amarelo/verde.
+        Este aviso some quando o documento é conferido na tela do funcionário.</div>
+      ${lista.length ? `<table class="lista"><thead><tr>
+          <th>Filial</th><th>Funcionário</th><th>Documentos</th><th>Enviado por</th><th></th>
+        </tr></thead><tbody>${lista.map(x=>`<tr>
+          <td>${esc(x.funcionario.filial||'—')}</td>
+          <td><b>${esc(x.funcionario.nome)}</b></td>
+          <td>${x.docs.map(d=>`<span class="pill opcional">${esc(d.tipo)}</span>`).join(' ')}</td>
+          <td style="color:var(--apagado)">${esc([...new Set(x.docs.map(d=>d.enviadoPor).filter(Boolean))].join(', ')||'—')}</td>
+          <td style="text-align:right"><button class="btn sec mini"
+            data-abrir-func="${x.funcionario.id}">Abrir</button></td>
+        </tr>`).join('')}</tbody></table>`
+        : '<div class="vazio"><b>Nada pendente</b>Todos os opcionais já foram conferidos.</div>'}
+    </div>`, true);
+  el.querySelectorAll('[data-abrir-func]').forEach(b=> b.onclick = ()=>{
+    el.remove();
+    abrirDocumentos(b.dataset.abrirFunc);
+  });
+  return el;
+}
 
 function prazoDaCompetencia(){
   const p = S.prazos.find(x=>x.competencia===S.competencia);
@@ -1075,31 +1253,72 @@ function desenhar(){
     : (S.sessao.filial || 'Gerente');
   document.getElementById('btnAdmin').style.display = podeConfigurar() ? '' : 'none';
 
+  /* CONTABILIDADE virou seção da folha: some do topo, e quem ainda tinha a
+     aba marcada no cadastro passa a entrar pela Folha de pagamento. */
+  if(S.aba==='CONTABILIDADE'){ S.aba='FOLHA'; S.folhaParte='CONTABILIDADE'; }
   const nav = document.getElementById('abas');
-  nav.innerHTML = S.sessao.abas.filter(a=>a!=='ADMIN').map(a=>
+  nav.innerHTML = S.sessao.abas.filter(a=>a!=='ADMIN' && a!=='CONTABILIDADE').map(a=>
     `<button class="aba ${a===S.aba?'on':''}" data-aba="${a}">${ROTULO_ABA[a]||a}</button>`
   ).join('');
-  nav.querySelectorAll('.aba').forEach(b=> b.onclick = ()=>{ S.aba=b.dataset.aba; desenhar(); });
+  nav.querySelectorAll('.aba').forEach(b=> b.onclick = ()=>{
+    S.aba = b.dataset.aba;
+    desenhar();
+    /* entrar em Anexar é o momento em que a lista de documentos precisa
+       estar certa: confere com o servidor em segundo plano */
+    if(S.aba==='ANEXAR') atualizarSilencioso();
+  });
 
   const c = document.getElementById('conteudo');
-  if(S.aba==='ANEXAR') c.innerHTML = telaAnexar();
-  else if(S.aba==='FUNCIONARIOS') c.innerHTML = telaFuncionarios();
+  /* A tabela é reconstruída inteira a cada desenho, e o navegador zera a
+     rolagem junto. Quem estava no fim da lista de 300 nomes voltava ao topo
+     toda vez que salvava um cadastro. Guarda onde estava e devolve depois —
+     só quando continua na mesma aba; trocar de aba começa do topo, como antes. */
+  const rolavel = c.querySelector('.rolagem-alta');
+  const mesmaAba = (_abaDesenhada === S.aba);
+  const rolagem = mesmaAba && rolavel ? rolavel.scrollTop : 0;
+  const janela = mesmaAba ? window.scrollY : 0;
+  _abaDesenhada = S.aba;
+
+  const aviso = avisoOpcionais();
+  if(S.aba==='ANEXAR') c.innerHTML = aviso + telaAnexar();
+  else if(S.aba==='FUNCIONARIOS') c.innerHTML = aviso + telaFuncionarios();
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
-  else if(S.aba==='PENDENCIAS') c.innerHTML = telaPendencias();
+  else if(S.aba==='PENDENCIAS') c.innerHTML = aviso + telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
-  else if(S.aba==='CONTABILIDADE') c.innerHTML = telaContabilidade();
-  else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
+  else if(S.aba==='FOLHA') c.innerHTML = telaFolhaGeral();
   ligarEventos();
-  ajustarRolagem();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='COMISSOES') ligarComissoes();
   if(S.aba==='QUEBRAS') ligarQuebras();
-  if(S.aba==='CONTABILIDADE') ligarContabilidade();
-  if(S.aba==='FOLHA') ligarFolha();
+  if(S.aba==='FOLHA') ligarFolhaGeral();
+
+  /* A janela vem antes: ajustarRolagem mede a altura da tabela a partir da
+     posição da página, então devolver a rolagem da janela depois faria a
+     conta com o número errado. */
+  if(janela) window.scrollTo(0, janela);
+  ajustarRolagem();
+  const novoRolavel = c.querySelector('.rolagem-alta');
+  if(novoRolavel && rolagem) novoRolavel.scrollTop = rolagem;
+
+  /* Depois de salvar, pisca a linha uma vez. Só rola até ela se tiver saído
+     da vista — mudar de filial reordena a lista e tira a linha do lugar. */
+  if(S.destacar){
+    const linha = c.querySelector(`[data-linha-func="${S.destacar}"], [data-docs="${S.destacar}"]`);
+    S.destacar = null;
+    if(linha){
+      if(novoRolavel){
+        const a = linha.getBoundingClientRect(), b = novoRolavel.getBoundingClientRect();
+        if(a.bottom <= b.top + 2 || a.top >= b.bottom - 2) linha.scrollIntoView({block:'center'});
+      }
+      linha.classList.add('piscando');
+      setTimeout(()=>linha.classList.remove('piscando'), 1600);
+    }
+  }
 }
+let _abaDesenhada = null;
 
 function barraFiltros(comBotao){
   const ops = ['<option value="TODAS">Todas as filiais</option>']
@@ -1134,6 +1353,8 @@ function telaFuncionarios(){
   let html = barraFiltros(true);
   const cont = {vermelho:0, ambar:0, verde:0, neutro:0};
   ativos.forEach(f=> cont[situacao(f)]++);
+  const exp1 = ativos.filter(f=>{const e=experiencia(f); return e && e.fase===1;}).length;
+  const exp2 = ativos.filter(f=>{const e=experiencia(f); return e && e.fase===2;}).length;
 
   html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
     <span>Competência <b>${compBonita(S.competencia)}</b> · prazo <b>${dataBonita(prazoDaCompetencia())}</b></span>
@@ -1144,6 +1365,21 @@ function telaFuncionarios(){
       <span style="color:var(--apagado)"><b>${ativos.length}</b> no total</span>
     </span>
   </div>`;
+
+  const avisos = ativos.filter(f=>f.status==='AVISO').length;
+  if(exp1 || exp2 || avisos){
+    html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <span><b>Faixa da linha</b> — aviso prévio vem antes da experiência.</span>
+      <span style="margin-left:auto;display:flex;gap:14px;font-size:12px;align-items:center">
+        ${avisos?`<span style="color:var(--vermelho)"><span class="selo-exp av">AVISO</span>
+          <b style="margin-left:6px">${avisos}</b> em aviso prévio</span>`:''}
+        ${exp1?`<span style="color:var(--ambar)"><span class="selo-exp e1">EXP 30</span>
+          <b style="margin-left:6px">${exp1}</b> até 29 dias de casa</span>`:''}
+        ${exp2?`<span style="color:var(--laranja)"><span class="selo-exp e2">EXP 60</span>
+          <b style="margin-left:6px">${exp2}</b> do 30º ao 60º dia</span>`:''}
+      </span>
+    </div>`;
+  }
 
   if(!ativos.length) return html + vazio('Nenhum funcionário encontrado',
     'Cadastre o primeiro funcionário ou ajuste a busca.');
@@ -1182,11 +1418,13 @@ function linhaFuncionario(f){
     : 'Sem obrigação nesta competência';
   const fil = S.filiais.find(x=>x.nome===f.filial);
   const dica = [f.cpf?'CPF '+f.cpf:'', fil&&fil.cnpj?'CNPJ '+fil.cnpj:''].filter(Boolean).join(' · ');
+  const faixa = faixaLinha(f);
 
-  return `<tr>
+  return `<tr data-linha-func="${f.id}"${
+      faixa?` class="${faixa.classe}" title="${esc(faixa.titulo)}"`:''}>
     <td class="t-filial">${esc(f.filial||'—')}</td>
     <td class="t-nome" title="${esc(nota)}">
-      <span class="bolinha p-${cor}"></span><span class="c-${cor}">${esc(f.nome)}</span></td>
+      <span class="bolinha p-${cor}"></span><span class="c-${cor}">${esc(f.nome)}</span>${seloExperiencia(f)}</td>
     <td class="t-apagado">${esc(f.cargo||'—')}</td>
     <td class="mono t-apagado">${dataBonita(f.dataInicio)}</td>
     <td class="mono">${dataBonita(f.dataAdmissao)}</td>
@@ -1354,6 +1592,7 @@ function ligarDelegacao(){
     if((el = alvo('#btnNovo')))           { abrirFuncionario(null); return; }
     if((el = alvo('#verExcluidos')))      { abrirExcluidos(); return; }
     if((el = alvo('#btnImportar')))       { abrirImportacao(); return; }
+    if((el = alvo('#verOpcionais')))      { abrirOpcionais(); return; }
     if((el = alvo('[data-pend]'))){
       S.pendAberta = S.pendAberta===el.dataset.pend ? null : el.dataset.pend;
       desenhar();
@@ -1669,6 +1908,7 @@ function abrirFuncionario(id, extra){
       const salvo = Object.assign({}, f, dados, {id: r.id});
       const i = S.funcionarios.findIndex(x=>x.id===r.id);
       if(i>=0) S.funcionarios[i] = salvo; else S.funcionarios.push(salvo);
+      S.destacar = r.id;
       desenhar();
       if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
       toast(dados.status==='DEMITIDO' ? 'Funcionário movido para Ex-funcionários.'
@@ -1758,7 +1998,11 @@ function desenharDocs(el){
       </div>
       <div class="prazo">Prazo para anexar: <b>${dataBonita(prazoDaCompetencia())}</b><br>
         Filial <b>${esc(f.filial)}</b> · Admissão <b>${dataBonita(f.dataAdmissao)}</b></div>
-      <div style="margin-left:auto" class="prazo">Troque o mês no topo da tela para anexar outra competência.</div>
+      <div style="margin-left:auto" class="prazo">
+        <b>${S.docsLista.length}</b> documento${S.docsLista.length===1?'':'s'} no total ·
+        <b>${doMes.length}</b> em ${compBonita(comp)}${outros.length
+          ? ' · <b>'+outros.length+'</b> em outros meses, mais abaixo' : ''}<br>
+        Troque o mês no topo da tela para anexar outra competência.</div>
     </div>
     <div class="colunas-docs">
     <div>
@@ -1787,25 +2031,24 @@ function desenharDocs(el){
       </div>
     </div></div></div>`;
 
+  /* Os meses anteriores vinham como linhas de texto no fim do modal: dava para
+     abrir um por um, mas ninguém enxergava o conjunto. Agora são cartões
+     iguais aos do mês, agrupados por competência. */
   if(outros.length){
-    html += `<div class="hist-comp"><div class="hist-titulo">Outras competências</div>`;
-    let compAtual = '';
-    outros.forEach(d=>{
-      if(d.competencia!==compAtual){
-        compAtual = d.competencia;
-        html += `<div class="hist-titulo mono" style="margin-top:12px;color:var(--tinta)">${compBonita(compAtual)}</div>`;
-      }
-      html += `<div class="hist-linha">
-        <input type="checkbox" class="chk" data-id="${d.id}" ${S.selecao.has(d.id)?'checked':''}>
-        <span class="ponto p-${d.status==='APROVADO'?'verde':'ambar'}"></span>
-        <b>${esc(d.tipo)}</b>
-        <span style="color:var(--apagado)">${esc(d.arquivoNome)}</span>
-        <span style="margin-left:auto"></span>
-        <button class="link-acao" data-ver="${d.id}">Ver</button>
-        ${podeAprovar()?`<button class="link-acao" data-baixar="${d.id}">PDF</button>`:''}
-        ${podeAprovar()&&d.status!=='APROVADO'?`<button class="link-acao apr" data-aprovar="${d.id}">Aprovar</button>`:''}
-        <button class="link-acao rem" data-excluir="${d.id}">Excluir</button>
-      </div>`;
+    html += `<div class="hist-comp"><div class="hist-titulo">Outras competências
+      <small style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--apagado)">
+        ${outros.length} documento${outros.length===1?'':'s'}</small></div>`;
+    const meses = [...new Set(outros.map(d=>d.competencia))];
+    meses.forEach(m=>{
+      const doMesX = outros.filter(d=>d.competencia===m);
+      const tiposX = [...new Set(doMesX.map(d=>d.tipo))]
+        .sort((a,b)=> tipos.indexOf(a) - tipos.indexOf(b) || a.localeCompare(b,'pt-BR'));
+      html += `<div class="titulo-grupo mono" style="color:var(--tinta)">${compBonita(m)}</div>
+        <div class="grade-docs">`;
+      tiposX.forEach(t=>{
+        html += cardDoc(t, doMesX.filter(d=>d.tipo===t), f, !tipos.includes(t), m);
+      });
+      html += `</div>`;
     });
     html += `</div>`;
   }
@@ -1824,7 +2067,7 @@ function miolo(d){
 
 /* Um campo pode ter vários arquivos: frente e verso, páginas soltas, uma
    segunda foto melhor. O primeiro aparece grande e os demais numa tira. */
-function cardDoc(tipo, docs, f, opcional){
+function cardDoc(tipo, docs, f, opcional, outroMes){
   docs = (docs||[]).slice().sort((a,b)=>String(a.enviadoEm||'').localeCompare(String(b.enviadoEm||'')));
   if(!docs.length){
     return `<div class="card-doc falta">
@@ -1832,7 +2075,8 @@ function cardDoc(tipo, docs, f, opcional){
         <span class="ponto ${opcional?'p-neutro':'p-vermelho'}"></span>
         <span class="card-doc-tipo">${esc(tipo)}</span></div>
       <div class="miniatura sem">${opcional?'Opcional':'Não anexado'}</div>
-      <div class="card-doc-pe"><button class="link-acao" data-anexar="${esc(tipo)}">+ Anexar</button></div>
+      <div class="card-doc-pe">${outroMes?'':
+        `<button class="link-acao" data-anexar="${esc(tipo)}">+ Anexar</button>`}</div>
     </div>`;
   }
   const principal = docs[0];
@@ -1859,7 +2103,7 @@ function cardDoc(tipo, docs, f, opcional){
         <button class="arq-x" data-excluir="${d.id}" title="Excluir este arquivo">✕</button>
       </span>`).join('')}</div>`:''}
     <div class="card-doc-pe">
-      <button class="link-acao" data-anexar="${esc(tipo)}">+ Arquivo</button>
+      ${outroMes ? '' : `<button class="link-acao" data-anexar="${esc(tipo)}">+ Arquivo</button>`}
       ${podeAprovar() ? (todosAprovados
           ? `<button class="link-acao" data-reprovar="${ids.join(',')}">Reabrir</button>`
           : `<button class="link-acao apr" data-aprovar="${ids.join(',')}">Aprovar</button>`) : ''}
@@ -2504,7 +2748,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','CONTABILIDADE','FOLHA'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -2958,7 +3202,8 @@ function desenharQuebras(el){
     <div class="grade-quebra">
       <div><label class="campo-lbl" for="qbData">Data</label>
         <input class="entrada" type="date" id="qbData" min="${primeiro}" max="${ultimo}" value="${ultimo}"></div>
-      <div><label class="campo-lbl" for="qbCodigo">Código do produto</label>
+      <div><label class="campo-lbl" for="qbCodigo">Código do produto <span
+          style="text-transform:none;letter-spacing:0;font-weight:400">(opcional)</span></label>
         <input class="entrada mono" id="qbCodigo" placeholder="SKU"></div>
       <div><label class="campo-lbl" for="qbUnit">Custo unitário</label>
         <input class="entrada mono" id="qbUnit" placeholder="0,00" style="text-align:right"></div>
@@ -3007,7 +3252,7 @@ function desenharQuebras(el){
     const codigo = q('#qbCodigo').value.trim();
     const unit = q('#qbUnit').value.trim();
     const qtd = q('#qbQtd').value.trim();
-    if(!codigo) return toast('Informe o código do produto.', true);
+    /* o código do produto é opcional: nem toda quebra tem etiqueta legível */
     if(!valorNum(unit)) return toast('Informe o custo unitário.', true);
     if(!valorNum(qtd)) return toast('Informe a quantidade.', true);
     carregando(true);
@@ -3124,6 +3369,27 @@ function funcionariosDaFolha(){
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
                   || a.nome.localeCompare(b.nome,'pt-BR'));
+}
+
+/* As duas telas viraram uma aba só. O conteúdo continua separado — são
+   lançamentos diferentes, com salvamentos diferentes — mas agora convivem
+   como seções da Folha de pagamento, e não como abas distintas no topo. */
+function telaFolhaGeral(){
+  const parte = S.folhaParte === 'CONTABILIDADE' ? 'CONTABILIDADE' : 'FOLHA';
+  const abas = `
+    <div class="sub-abas" id="folhaPartes">
+      <button class="sub-aba ${parte==='FOLHA'?'on':''}" data-parte="FOLHA">Vale, VT e VR</button>
+      <button class="sub-aba ${parte==='CONTABILIDADE'?'on':''}" data-parte="CONTABILIDADE">Contabilidade</button>
+    </div>`;
+  return abas + (parte==='CONTABILIDADE' ? telaContabilidade() : telaFolha());
+}
+
+function ligarFolhaGeral(){
+  document.querySelectorAll('#folhaPartes .sub-aba').forEach(b=> b.onclick = ()=>{
+    S.folhaParte = b.dataset.parte;
+    desenhar();
+  });
+  if(S.folhaParte === 'CONTABILIDADE') ligarContabilidade(); else ligarFolha();
 }
 
 function telaFolha(){
@@ -3919,11 +4185,13 @@ function linhaAnexo(f, tipos){
           const n = meus.filter(d=>d.tipo===t).length;
           return `<span class="pill opcional">${esc(t)}${n>1?' ·'+n:''}</span>`;
         }).join('');
+  const faixa = faixaLinha(f);
   return `
-  <div class="linha-anexo" data-docs="${f.id}">
+  <div class="linha-anexo${faixa?' '+faixa.classe:''}" data-docs="${f.id}"${
+      faixa?` title="${esc(faixa.titulo)}"`:''}>
     <div class="marcador m-${cor}"></div>
     <div>
-      <div class="nome c-${cor}" style="padding:0">${esc(f.nome)}</div>
+      <div class="nome c-${cor}" style="padding:0">${esc(f.nome)}${seloExperiencia(f)}</div>
       <div class="pills">${pills}</div>
     </div>
     <div class="cel mono esconde-mob" style="text-align:right">${anexados}/${tipos.length}</div>
@@ -4442,8 +4710,34 @@ function extrairCartoes(paginas, nomeArquivo){
 
 /* ---------- cálculos cadastrados ---------- */
 const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
-  jornadaDomingo:'06:00', tolerancia:'10', noturnoIni:'22:00', noturnoFim:'05:00',
+  jornadaSabadoRua:'04:00', jornadaDomingo:'06:00', tolerancia:'10',
+  tolEntrada:'5', tolSaida:'5', noturnoIni:'22:00', noturnoFim:'05:00',
   base:'FIXA', domingoExtra:'100'};
+
+/* Margem do dia em minutos: entrada + saída. Cálculos antigos, que só têm a
+   tolerância única, continuam valendo com ela até alguém salvar os campos
+   novos — assim nenhuma apuração antiga muda sozinha. */
+function margemDe(c){
+  const e = parseInt(c.tolEntrada, 10), sd = parseInt(c.tolSaida, 10);
+  if(e >= 0 || sd >= 0) return (e >= 0 ? e : 0) + (sd >= 0 ? sd : 0);
+  const velha = parseInt(c.tolerancia, 10);
+  return velha >= 0 ? velha : 10;
+}
+function tolPartes(c){
+  const e = parseInt(c.tolEntrada, 10), sd = parseInt(c.tolSaida, 10);
+  if(e >= 0 || sd >= 0) return {entrada: e >= 0 ? e : 0, saida: sd >= 0 ? sd : 0};
+  const velha = parseInt(c.tolerancia, 10);
+  return {entrada: velha >= 0 ? velha : 10, saida: 0};
+}
+
+/* Loja de rua ou de shopping, a partir do grupo da filial. */
+function tipoLojaDaFilial(filial){
+  if(!filial) return '';
+  const f = (S.filiais||[]).find(x=>x.nome===filial);
+  if(!f || !f.grupo) return '';
+  const g = (S.grupos||[]).find(x=>x.nome===f.grupo);
+  return g ? (g.tipoLoja || 'RUA') : '';
+}
 
 function calculoPor(id){
   return S.he.calculos.find(c=>c.id===id) || S.he.calculos[0] || CALCULO_PADRAO;
@@ -4451,18 +4745,28 @@ function calculoPor(id){
 function calculoAtual(){ return calculoPor(S.he.calculoId); }
 function resumoCalculo(c){
   return c.jornada+' · sáb '+(c.jornadaSabado||c.jornada)+
+         ' (rua '+(c.jornadaSabadoRua||'04:00')+')'+
          ' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
          ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
-         ' · tol. '+c.tolerancia+' min'+(c.base==='CH'?' · base CH':'');
+         ' · margem '+tolPartes(c).entrada+'+'+tolPartes(c).saida+' min'+
+         (c.base==='CH'?' · base CH':'');
 }
 
 /* ---------- apuração ---------- */
-function apurar(cartao, cfg){
+function apurar(cartao, cfg, filial){
   const notIni = horaParaMin(cfg.noturnoIni), notFim = horaParaMin(cfg.noturnoFim);
   const jornadaFixa = horaParaMin(cfg.jornada);
-  const jornadaSab = horaParaMin(cfg.jornadaSabado || cfg.jornada);
+  /* Loja de rua abre meio período no sábado. Sem filial conhecida, usa a
+     jornada geral de sábado — não dá para adivinhar o tipo da loja. */
+  const ehRua = tipoLojaDaFilial(filial || cartao.filial) === 'RUA';
+  const jornadaSab = horaParaMin(
+    ehRua ? (cfg.jornadaSabadoRua || '04:00') : (cfg.jornadaSabado || cfg.jornada));
   const jornadaDom = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
   const tol = +cfg.tolerancia;
+  /* Margem do dia: soma da tolerância de entrada com a de saída. Dentro dela
+     não se desconta atraso nem se paga hora extra — é o que diz o art. 58 §1º
+     da CLT, e é o que o RH pediu. Passando da margem, conta tudo. */
+  const margem = margemDe(cfg);
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
     atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0, diasAbono:0,
@@ -4510,7 +4814,9 @@ function apurar(cartao, cfg){
       : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
       : sabado ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
       : (cfg.base === 'CH' ? d.ch : jornadaFixa);
-    const extra = Math.max(0, trabalhado - base);
+    /* minutos dentro da margem não viram hora extra */
+    const sobra = Math.max(0, trabalhado - base);
+    const extra = sobra > margem ? sobra : 0;
 
     /* os minutos extras são os últimos do dia: é ali que cai o adicional noturno */
     let resto = extra, extraNot = 0;
@@ -4524,14 +4830,19 @@ function apurar(cartao, cfg){
     if(cem){ r.he100d += extraDiu; r.he100n += extraNot; }
     else   { r.he50d  += extraDiu; r.he50n  += extraNot; }
 
+    /* e minutos faltantes dentro da margem não viram atraso.
+       A tolerância antiga do cálculo continua valendo como piso mínimo, para
+       não afrouxar quem já tinha 10 minutos configurados. */
     let atraso = 0;
     if(base > 0 && !abonado){
       const falta = base - trabalhado;
-      if(falta > tol){ atraso = falta; r.atrasos += falta; r.diasAtraso++; }
+      if(falta > margem){ atraso = falta; r.atrasos += falta; r.diasAtraso++; }
     }
     r.detalhe.push(Object.assign({}, d, {
       tipo: abonado ? 'ABONO' : feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
-      trabalhado, extra, extraNot, atraso
+      trabalhado, extra, extraNot, atraso,
+      naMargem: (sobra > 0 && sobra <= margem) ? sobra
+               : (base > trabalhado && base - trabalhado <= margem) ? -(base - trabalhado) : 0
     }));
   });
 
@@ -4690,7 +5001,8 @@ function gradeCartao(op){
   };
 
   const atualizar = ()=>{
-    const r = apurar({nome:'', dias: montar()}, calculoPor(op.calculoId));
+    const r = apurar({nome:'', dias: montar()}, calculoPor(op.calculoId),
+      (S.funcionarios.find(x=>x.id===op.funcionarioId)||{}).filial || op.filial || '');
     r.detalhe.forEach((d,i)=>{
       const cel = q('#mCalc'+i);
       if(!cel) return;
@@ -4744,7 +5056,7 @@ function gradeCartao(op){
       funcionarioId: f ? f.id : '', filial: f ? f.filial : '', cargo: f ? f.cargo : (op.cargo||''),
       periodoIni: cartao.periodoIni, periodoFim: cartao.periodoFim,
       calculoId: op.calculoId, observacoes: q('#mObs').value.trim(),
-      ap: apurar(cartao, calculoPor(op.calculoId))
+      ap: apurar(cartao, calculoPor(op.calculoId), f ? f.filial : '')
     };
     guardarResultado(item, op.indice);
 
@@ -4915,7 +5227,7 @@ function ligarHorasExtras(){
     ev.stopPropagation();
     const r = S.he.resultados[+x.dataset.calc];
     r.calculoId = x.value;
-    r.ap = apurar(r.cartao, calculoPor(r.calculoId));
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial);
     desenhar();
   });
   document.querySelectorAll('[data-calc]').forEach(x=> x.onclick = ev=>ev.stopPropagation());
@@ -4984,7 +5296,8 @@ async function importarCartoes(todos){
             nome: cart.nome, cartao: cart, arquivo: arq.name,
             funcionarioId: f?f.id:'', filial: f?f.filial:'', cargo: (f&&f.cargo)||cart.cargo,
             periodoIni: cart.periodoIni, periodoFim: cart.periodoFim,
-            calculoId: S.he.calculoId, ap: apurar(cart, calculoPor(S.he.calculoId))
+            calculoId: S.he.calculoId,
+            ap: apurar(cart, calculoPor(S.he.calculoId), f?f.filial:'')
           };
           if(anterior>=0) S.he.resultados[anterior] = item;
           else S.he.resultados.push(item);
@@ -5017,7 +5330,7 @@ function filaDeFotos(imagens){
 }
 
 function recalcular(){
-  S.he.resultados.forEach(r=> r.ap = apurar(r.cartao, calculoPor(r.calculoId)));
+  S.he.resultados.forEach(r=> r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial));
   desenhar();
 }
 
@@ -5223,6 +5536,7 @@ function gerenciarCalculos(){
       <button class="fechar" aria-label="Fechar">✕</button>
     </div>
     <div class="modal-corpo" id="calcCorpo"></div>`, true);
+  el.querySelector('.modal').classList.add('extra-larga');
   desenharCalculos(el);
 }
 
@@ -5232,11 +5546,14 @@ function linhaCalculo(c, novo){
                placeholder="${novo?'Ex.: CALCULO 02':''}" style="min-width:130px"></td>
     <td><input class="entrada mono" data-c="jornada" value="${esc(c.jornada||'07:20')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="jornadaSabado" value="${esc(c.jornadaSabado||c.jornada||'07:20')}" style="width:72px"></td>
+    <td><input class="entrada mono" data-c="jornadaSabadoRua" value="${esc(c.jornadaSabadoRua||'04:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="jornadaDomingo" value="${esc(c.jornadaDomingo||'06:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoIni" value="${esc(c.noturnoIni||'22:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoFim" value="${esc(c.noturnoFim||'05:00')}" style="width:72px"></td>
-    <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolerancia"
-               value="${esc(c.tolerancia||'10')}" style="width:64px"></td>
+    <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolEntrada"
+               value="${esc(String(tolPartes(novo?{}:c).entrada))}" style="width:64px"></td>
+    <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolSaida"
+               value="${esc(String(tolPartes(novo?{}:c).saida))}" style="width:64px"></td>
     <td><select class="entrada" data-c="base">
       <option value="FIXA" ${c.base!=='CH'?'selected':''}>Jornadas fixas</option>
       <option value="CH" ${c.base==='CH'?'selected':''}>CH do cartão</option>
@@ -5265,16 +5582,22 @@ function desenharCalculos(el){
       <b>Cálculo</b> da tabela.
     </div>
     <div class="previa" style="max-height:none">
-      <table><thead><tr>
-        <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Domingo</th><th>Noturno de</th><th>até</th>
-        <th>Tolerância</th><th>Base</th><th>Extra domingo</th><th></th>
+      <table class="tab-calc"><thead><tr>
+        <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Sáb. loja de rua</th><th>Domingo</th>
+        <th>Noturno de</th><th>até</th>
+        <th>Tol. entrada</th><th>Tol. saída</th><th>Base</th><th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
       ${linhaCalculo({}, true)}
       </tbody></table>
     </div>
     <div class="prazo" style="margin-top:12px;font-size:12px;color:var(--apagado)">
-      A tolerância é em minutos por dia. <b>Base</b> escolhe a régua das horas extras:
+      <b>Tol. entrada</b> e <b>Tol. saída</b> são os minutos de margem em cada ponta do dia.
+      Somados, valem como a margem diária: dentro dela o sistema não desconta atraso
+      nem paga hora extra. Passando dela, conta tudo.<br>
+      <b>Sáb. loja de rua</b> vale para quem trabalha em filial de grupo marcado como
+      <b>Rua</b>; as demais seguem a coluna <b>Sábado</b>.<br>
+      <b>Base</b> escolhe a régua das horas extras:
       as jornadas cadastradas aqui, ou a carga horária que vem impressa em cada linha do cartão.
       ${Object.keys(usados).length>1?'<br>Nesta apuração há cartões usando cálculos diferentes.':''}
     </div>`;
@@ -5285,9 +5608,11 @@ function desenharCalculos(el){
     const calculo = {
       id: tr.dataset.novo ? '' : tr.dataset.calcId,
       nome: v('nome'), jornada: v('jornada'),
-      jornadaSabado: v('jornadaSabado'), jornadaDomingo: v('jornadaDomingo'),
+      jornadaSabado: v('jornadaSabado'), jornadaSabadoRua: v('jornadaSabadoRua'),
+      jornadaDomingo: v('jornadaDomingo'),
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
-      tolerancia: v('tolerancia'), base: v('base'), domingoExtra: v('domingoExtra')
+      tolEntrada: v('tolEntrada'), tolSaida: v('tolSaida'),
+      base: v('base'), domingoExtra: v('domingoExtra')
     };
     if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
     carregando(true);
