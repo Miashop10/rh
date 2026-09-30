@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.30g';
+  const VERSAO_APP = '2026.09.30h';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -591,7 +591,7 @@ select.g-campo.sem{color:var(--ambar)}
 .solta b{display:block;margin-bottom:4px}
 .solta small{color:var(--apagado)}
 .previa{max-height:340px;overflow:auto;border:1px solid var(--linha);border-radius:2px}
-.previa table.tab-calc{min-width:1180px}
+.previa table.tab-calc{min-width:1330px}
 .previa table{width:100%;border-collapse:collapse;font-size:13px}
 .previa th{
   position:sticky;top:0;background:#f6f7f9;text-align:left;padding:8px 10px;
@@ -4727,7 +4727,8 @@ function extrairCartoes(paginas, nomeArquivo){
 /* ---------- cálculos cadastrados ---------- */
 const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
   jornadaSabadoRua:'04:00', jornadaDomingo:'06:00', tolerancia:'10',
-  tolEntrada:'5', tolSaida:'5', noturnoIni:'22:00', noturnoFim:'05:00',
+  tolEntrada:'5', tolSaida:'5', margemExtra:'NAO',
+  noturnoIni:'22:00', noturnoFim:'05:00',
   base:'FIXA', domingoExtra:'100'};
 
 /* Margem do dia em minutos: entrada + saída. Cálculos antigos, que só têm a
@@ -4768,6 +4769,7 @@ function resumoCalculo(c){
          ' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
          ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
          ' · margem '+tolPartes(c).entrada+'+'+tolPartes(c).saida+' min'+
+         (c.margemExtra==='SIM'?' (atraso e extra)':' (só atraso)')+
          (c.base==='CH'?' · base CH':'');
 }
 
@@ -4844,9 +4846,12 @@ function apurar(cartao, cfg, filial){
       : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
       : sabado ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
       : (cfg.base === 'CH' ? d.ch : jornadaFixa);
-    /* minutos dentro da margem não viram hora extra */
+    /* A margem sempre protege o funcionário do desconto. Se ela também deve
+       segurar os minutos a mais (art. 58 §1º da CLT, que manda desprezar a
+       variação nos dois sentidos) é escolha de cada cálculo — por padrão não
+       segura, e toda hora extra é paga desde o primeiro minuto. */
     const sobra = Math.max(0, trabalhado - base);
-    const extra = sobra > margem ? sobra : 0;
+    const extra = (cfg.margemExtra === 'SIM' && sobra <= margem) ? 0 : sobra;
 
     /* os minutos extras são os últimos do dia: é ali que cai o adicional noturno */
     let resto = extra, extraNot = 0;
@@ -5613,6 +5618,10 @@ function linhaCalculo(c, novo){
                value="${esc(String(tolPartes(novo?{}:c).entrada))}" style="width:64px"></td>
     <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolSaida"
                value="${esc(String(tolPartes(novo?{}:c).saida))}" style="width:64px"></td>
+    <td><select class="entrada" data-c="margemExtra">
+      <option value="NAO" ${c.margemExtra!=='SIM'?'selected':''}>Só atraso</option>
+      <option value="SIM" ${c.margemExtra==='SIM'?'selected':''}>Atraso e extra</option>
+    </select></td>
     <td><select class="entrada" data-c="base">
       <option value="FIXA" ${c.base!=='CH'?'selected':''}>Jornadas fixas</option>
       <option value="CH" ${c.base==='CH'?'selected':''}>CH do cartão</option>
@@ -5644,7 +5653,8 @@ function desenharCalculos(el){
       <table class="tab-calc"><thead><tr>
         <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Sáb. loja de rua</th><th>Domingo</th>
         <th>Noturno de</th><th>até</th>
-        <th>Tol. entrada</th><th>Tol. saída</th><th>Base</th><th>Extra domingo</th><th></th>
+        <th>Tol. entrada</th><th>Tol. saída</th><th>Margem vale para</th>
+        <th>Base</th><th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
       ${linhaCalculo({}, true)}
@@ -5652,8 +5662,10 @@ function desenharCalculos(el){
     </div>
     <div class="prazo" style="margin-top:12px;font-size:12px;color:var(--apagado)">
       <b>Tol. entrada</b> e <b>Tol. saída</b> são os minutos de margem em cada ponta do dia.
-      Somados, valem como a margem diária: dentro dela o sistema não desconta atraso
-      nem paga hora extra. Passando dela, conta tudo.<br>
+      Somados, valem como a margem diária. <b>Margem vale para</b> decide o alcance:
+      em <b>Só atraso</b> (padrão) a margem apenas evita o desconto, e toda hora extra é
+      paga desde o primeiro minuto; em <b>Atraso e extra</b> os minutos a mais dentro da
+      margem também não são pagos, como manda o art. 58 §1º da CLT.<br>
       <b>Sáb. loja de rua</b> vale para quem trabalha em filial de grupo marcado como
       <b>Rua</b>; as demais seguem a coluna <b>Sábado</b>.<br>
       <b>Base</b> escolhe a régua das horas extras:
@@ -5671,6 +5683,7 @@ function desenharCalculos(el){
       jornadaDomingo: v('jornadaDomingo'),
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
       tolEntrada: v('tolEntrada'), tolSaida: v('tolSaida'),
+      margemExtra: v('margemExtra'),
       base: v('base'), domingoExtra: v('domingoExtra')
     };
     if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
