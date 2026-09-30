@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.30e';
+  const VERSAO_APP = '2026.09.30g';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1044,6 +1044,10 @@ function aplicarCarga(d){
     tiposOpcionais: d.config.tiposOpcionais || []
   };
   if(!S.sessao.abas.includes(S.aba)) S.aba = S.sessao.abas[0] || 'FUNCIONARIOS';
+  /* Trocar um grupo de Rua para Shopping muda a jornada de sábado. Os cartões
+     já importados precisam ser recontados aqui, senão continuavam mostrando o
+     resultado da configuração antiga até reimportar. */
+  if(S.he.resultados.length) reapurar();
   desenhar();
 }
 
@@ -5040,13 +5044,17 @@ function gradeCartao(op){
       const cel = q('#mCalc'+i);
       if(!cel) return;
       if(!d.marcas.length){
-        cel.textContent = d.tipo==='FOLGA' ? 'folga' : d.tipo==='ABONO' ? 'abono' : 'falta';
+        cel.textContent = d.tipo==='FOLGA' ? 'folga' : d.tipo==='ABONO' ? 'abono'
+                        : d.tipo==='FERIADO' ? 'feriado' : 'falta';
         cel.style.color = d.tipo==='FALTA' ? 'var(--vermelho)' : 'var(--apagado)';
         return;
       }
       const partes = [minParaHora(d.trabalhado)];
       if(d.extra) partes.push('+'+minParaHora(d.extra));
       if(d.atraso) partes.push('-'+minParaHora(d.atraso));
+      /* dia de dobra: deixa explícito quantos turnos entraram na conta, para
+         a conferência não depender de contar batidas no olho */
+      if(d.marcas.length > 4) partes.push('· '+Math.floor(d.marcas.length/2)+' turnos');
       cel.textContent = partes.join('  ');
       cel.style.color = d.atraso ? 'var(--vermelho)' : d.extra ? 'var(--verde)' : 'var(--tinta)';
     });
@@ -5263,7 +5271,7 @@ function ligarHorasExtras(){
     ev.stopPropagation();
     const r = S.he.resultados[+x.dataset.calc];
     r.calculoId = x.value;
-    r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial);
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId), filialDoResultado(r));
     desenhar();
   });
   document.querySelectorAll('[data-calc]').forEach(x=> x.onclick = ev=>ev.stopPropagation());
@@ -5365,10 +5373,24 @@ function filaDeFotos(imagens){
   proxima();
 }
 
-function recalcular(){
-  S.he.resultados.forEach(r=> r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial));
-  desenhar();
+/* A filial vem do cadastro do funcionário, não da cópia guardada no cartão:
+   se ele mudou de loja, ou se a loja mudou de grupo, a apuração tem de seguir
+   o dado de agora. */
+function filialDoResultado(r){
+  const f = S.funcionarios.find(x=>x.id===r.funcionarioId);
+  return (f && f.filial) || r.filial || '';
 }
+
+/* Refaz as contas sem redesenhar — usado também quando a carga do servidor
+   traz grupos ou filiais diferentes. */
+function reapurar(){
+  S.he.resultados.forEach(r=>{
+    r.filial = filialDoResultado(r);
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial);
+  });
+}
+
+function recalcular(){ reapurar(); desenhar(); }
 
 function detalheHoras(i){
   const r = S.he.resultados[i];
