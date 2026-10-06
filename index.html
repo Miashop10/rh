@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.09.30h';
+  const VERSAO_APP = '2026.10.06';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -648,6 +648,37 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
   place-items:center;backdrop-filter:blur(1px);
 }
 #carregando.on{display:grid}
+/* ---------- PAINEL DE ENVIOS ----------
+   Um cartão por arquivo, com o estado de cada um: carregando, salvo na nuvem
+   ou com erro. A barra de progresso sozinha não dizia o que tinha dado certo
+   quando um arquivo falhava no meio de vários. */
+#envios{
+  position:fixed;right:18px;bottom:18px;z-index:90;display:flex;flex-direction:column;
+  gap:8px;width:330px;max-width:calc(100vw - 36px);max-height:60vh;overflow:auto;
+}
+#envios:empty{display:none}
+.envio{
+  background:var(--cartao);border:1px solid var(--linha);border-left:3px solid var(--neutro);
+  border-radius:2px;box-shadow:var(--sombra);padding:9px 11px;font-size:12.5px;
+  display:flex;gap:9px;align-items:flex-start;
+}
+.envio .ico{width:14px;height:14px;flex:none;margin-top:2px;border-radius:50%}
+.envio.indo{border-left-color:var(--ambar)}
+.envio.indo .ico{
+  border:2px solid var(--ambar);border-top-color:transparent;
+  animation:girar .7s linear infinite;background:none;
+}
+.envio.ok{border-left-color:var(--verde)}
+.envio.ok .ico{background:var(--verde)}
+.envio.falhou{border-left-color:var(--vermelho)}
+.envio.falhou .ico{background:var(--vermelho)}
+.envio b{display:block;font-weight:600;color:var(--tinta)}
+.envio small{display:block;color:var(--apagado);font-size:11.5px;margin-top:1px;
+  word-break:break-word}
+.envio.falhou small{color:var(--vermelho)}
+.envio .fechar-envio{margin-left:auto;color:var(--apagado);font-size:14px;line-height:1;
+  padding:0 2px;flex:none}
+
 .progresso-txt{
   position:absolute;left:50%;top:calc(50% + 28px);transform:translateX(-50%);
   background:var(--tinta);color:#fff;font-size:12.5px;font-weight:600;
@@ -719,6 +750,7 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
 </div>
 
 <div id="toast"></div>
+<div id="envios" aria-live="polite"></div>
 <div id="carregando"><div class="giro"></div></div>
 <div id="modais"></div>
 
@@ -844,6 +876,42 @@ window.addEventListener('offline', ()=>mostrarEstado('fora','Offline'));
 window.addEventListener('online', ()=>{ mostrarEstado('','Online'); });
 
 /* Mostra o andamento de uma tarefa longa em cima do véu de carregamento. */
+/* Avisa, arquivo por arquivo, o que está indo para a nuvem e o que chegou.
+   Devolve um identificador para atualizar o estado depois. */
+let _envioSeq = 0;
+function envioAbrir(titulo, detalhe){
+  const cx = document.getElementById('envios');
+  if(!cx) return null;
+  const id = 'env' + (++_envioSeq);
+  const el = document.createElement('div');
+  el.className = 'envio indo';
+  el.id = id;
+  el.innerHTML = `<span class="ico"></span><span style="flex:1;min-width:0">
+    <b>${esc(titulo)}</b><small>${esc(detalhe || 'Enviando para a nuvem…')}</small></span>`;
+  cx.appendChild(el);
+  return id;
+}
+function envioEstado(id, estado, detalhe){
+  const el = id && document.getElementById(id);
+  if(!el) return;
+  el.className = 'envio ' + estado;
+  const s = el.querySelector('small');
+  if(s) s.textContent = detalhe || '';
+  const fechar = el.querySelector('.fechar-envio');
+  if(estado === 'ok'){
+    if(fechar) fechar.remove();
+    setTimeout(()=>{ el.style.opacity = '0'; el.style.transition = 'opacity .4s';
+      setTimeout(()=>el.remove(), 400); }, 4000);
+  }else if(estado === 'falhou' && !fechar){
+    /* erro fica na tela até a pessoa fechar: é informação que não pode sumir */
+    const x = document.createElement('button');
+    x.className = 'fechar-envio'; x.textContent = '✕';
+    x.title = 'Fechar aviso';
+    x.onclick = ()=>el.remove();
+    el.appendChild(x);
+  }
+}
+
 function progresso(texto){
   const cx = document.getElementById('carregando');
   if(!cx) return;
@@ -2343,32 +2411,44 @@ function anexar(el, tipo){
 
     const total = arquivos.length;
     let prontos = 0, enviados = 0;
+    const quem = S.docsFunc.nome, comp = compBonita(S.competencia);
     const passo = ()=> progresso(total>1
       ? 'Enviando '+(prontos)+'/'+total+'…'
       : 'Enviando documento…');
     passo();
 
     const {erros} = await emParalelo(arquivos, ENVIOS_SIMULTANEOS, async (arq)=>{
-      const pronto = await prepararArquivo(arq);
-      const doc = await api('enviarDocumento', {
-        funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
-        mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
-      }, {silencioso:true});
-      doc.miniatura = pronto.miniatura;
-      /* o servidor já devolveu o documento salvo: soma em memória
-         em vez de baixar a lista toda de novo */
-      S.docsLista.push(doc);
-      enviados++; prontos++; passo();
+      /* um aviso por arquivo: preparando, na nuvem, ou o erro na tela */
+      const aviso = envioAbrir(tipo + ' · ' + quem,
+        'Preparando ' + arq.name + '…');
+      try{
+        const pronto = await prepararArquivo(arq);
+        envioEstado(aviso, 'indo', 'Enviando para a nuvem…');
+        const doc = await api('enviarDocumento', {
+          funcionarioId: S.docsFunc.id, tipo, competencia: S.competencia,
+          mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
+        }, {silencioso:true});
+        doc.miniatura = pronto.miniatura;
+        /* o servidor já devolveu o documento salvo: soma em memória
+           em vez de baixar a lista toda de novo */
+        S.docsLista.push(doc);
+        enviados++; prontos++; passo();
+        envioEstado(aviso, 'ok', 'Salvo na nuvem · ' + comp);
+      }catch(e){
+        envioEstado(aviso, 'falhou', 'Não foi enviado — ' + e.message);
+        throw e;
+      }
     });
 
     progresso(null);
     if(enviados){ sincronizarDocs(); desenharDocs(el); desenhar(); }
     if(erros.length){
-      toast(erros[0].message + (enviados ? ' · '+enviados+' de '+total+' foram enviados.' : ''), true);
+      toast(erros.length + ' de ' + total + ' não ' + (erros.length>1?'foram enviados':'foi enviado') +
+            '. Veja o aviso no canto da tela.', true);
     }else{
       toast(enviados>1
-        ? enviados+' arquivos anexados em '+tipo+' de '+compBonita(S.competencia)+'.'
-        : tipo+' de '+compBonita(S.competencia)+' anexado.');
+        ? enviados+' arquivos anexados em '+tipo+' de '+comp+'.'
+        : tipo+' de '+comp+' anexado.');
     }
   };
   inp.click();
@@ -4131,7 +4211,9 @@ function telaAnexar(){
     .filter(f=>f.status!=='DEMITIDO')
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
-    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+    /* por filial, e dentro de cada uma em ordem alfabética */
+    .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
+                  || a.nome.localeCompare(b.nome,'pt-BR'));
 
   const mostraFiltro = podeAprovar();
   const ops = ['<option value="TODAS">Todas as filiais</option>']
@@ -4145,29 +4227,56 @@ function telaAnexar(){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     ${mostraFiltro?`<select class="campo" id="campoFilial">${ops.join('')}</select>`:''}
+    <div>
+      <label class="campo-lbl" for="compAnexar">Mês para visualizar e anexar</label>
+      <input class="entrada" type="month" id="compAnexar" value="${esc(S.competencia)}"
+             style="width:170px">
+    </div>
   </div>
   <div class="aviso info">
     Anexe os documentos de <b>${compBonita(S.competencia)}</b> até <b>${dataBonita(prazoDaCompetencia())}</b>.
-    Para trocar o mês, use o campo Competência no alto da tela.
     ${S.sessao.papel==='GERENTE'&&S.sessao.filial?` Você anexa os documentos da filial <b>${esc(S.sessao.filial)}</b>.`:''}
   </div>`;
 
   if(!ativos.length){
     html += vazio('Nenhum funcionário nesta filial',
       'Fale com o RH para incluir os funcionários da sua loja no sistema.');
-  }else{
-    const faltando = ativos.filter(f=>situacao(f)==='vermelho').length;
+    if(podeAprovar()) html += painelTipos();
+    return html;
+  }
+
+  /* Uma seção por filial: antes vinha tudo numa lista só, e com dezesseis
+     lojas o RH não achava ninguém. */
+  const porFilial = [];
+  ativos.forEach(f=>{
+    const nome = f.filial || 'SEM FILIAL';
+    let g = porFilial[porFilial.length-1];
+    if(!g || g.nome !== nome){ g = {nome, lista:[]}; porFilial.push(g); }
+    g.lista.push(f);
+  });
+
+  const faltamTudo = ativos.filter(f=>situacao(f)==='vermelho').length;
+  html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span><b>${ativos.length}</b> ${ativos.length===1?'funcionário':'funcionários'}
+      em <b>${porFilial.length}</b> ${porFilial.length===1?'filial':'filiais'}</span>
+    <span style="margin-left:auto;color:${faltamTudo?'var(--vermelho)':'var(--verde)'}">
+      ${faltamTudo? faltamTudo+' com documento faltando' : 'tudo anexado neste mês'}</span>
+  </div>`;
+
+  porFilial.forEach(g=>{
+    const faltando = g.lista.filter(f=>situacao(f)==='vermelho').length;
     html += `
     <section class="filial">
       <div class="filial-topo">
         <div>
-          <div class="filial-nome">${ativos.length} ${ativos.length===1?'funcionário':'funcionários'}</div>
-          <div class="filial-qtd">${faltando? faltando+' com documento faltando' : 'tudo anexado neste mês'}</div>
+          <div class="filial-nome">${esc(g.nome)}</div>
+          <div class="filial-qtd">${g.lista.length} ${g.lista.length===1?'funcionário':'funcionários'} ·
+            ${faltando? faltando+' com documento faltando' : 'tudo anexado neste mês'}</div>
         </div>
       </div>
-      ${ativos.map(f=>linhaAnexo(f, tipos)).join('')}
+      ${g.lista.map(f=>linhaAnexo(f, tipos)).join('')}
     </section>`;
-  }
+  });
 
   if(podeAprovar()) html += painelTipos();
   return html;
@@ -4259,6 +4368,13 @@ function ligarAnexar(){
     l.onclick = ()=>abrirDocumentos(l.dataset.docs));
 
   const b = id => document.getElementById(id);
+  /* o mesmo mês do alto da tela, à mão na aba onde ele é mais usado */
+  if(b('compAnexar')) b('compAnexar').onchange = e=>{
+    S.competencia = e.target.value || hojeCompetencia();
+    const alto = document.getElementById('competencia');
+    if(alto) alto.value = S.competencia;
+    recarregar();
+  };
   const adicionar = grupo => {
     lerTiposDaTela();
     S.tiposEdit[grupo].push('');
@@ -4646,9 +4762,14 @@ async function linhasDoPdf(buffer){
       if(!atual || Math.abs(atual.y - i.y) > 2.5){ atual = {y:i.y, itens:[i]}; linhas.push(atual); }
       else atual.itens.push(i);
     });
-    paginas.push(linhas.map(l=>
-      l.itens.sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').replace(/\s+/g,' ').trim()
-    ).filter(Boolean));
+    /* Cada linha vai com os pedaços e a posição horizontal de cada um. É o que
+       permite saber em qual coluna do relatório o texto estava — sem isso não
+       dá para separar as batidas dos totais e das observações. */
+    paginas.push(linhas.map(l=>{
+      const its = l.itens.sort((a,b)=>a.x-b.x);
+      return {t: its.map(i=>i.s).join(' ').replace(/\s+/g,' ').trim(),
+              itens: its.map(i=>({x:i.x, s:i.s}))};
+    }).filter(l=>l.t));
   }
   return paginas;
 }
@@ -4661,23 +4782,44 @@ function limparCampo(t){
    pode trazer vários funcionários, inclusive dois no mesmo pedaço de página,
    e o relatório de um mesmo funcionário pode ocupar várias páginas. */
 function extrairCartoes(paginas, nomeArquivo){
+  /* aceita tanto as linhas com posição quanto texto puro (relatório antigo
+     ou leitura que não trouxe as coordenadas) */
   const linhas = [];
-  paginas.forEach(p=> p.forEach(l=> linhas.push(l)));
+  paginas.forEach(p=> p.forEach(l=>
+    linhas.push(typeof l === 'string' ? {t: l, itens: null} : l)));
+
+  /* Onde cada coluna começa, lido do cabeçalho do relatório. Com isso as
+     batidas, os quatro totais e as observações são separados pela posição em
+     que foram impressos, e não por contagem — uma hora escrita na coluna de
+     observações deixa de ser confundida com uma batida. */
+  let xTotais = 0, xObs = 0;
+  linhas.forEach(l=>{
+    (l.itens||[]).forEach(i=>{
+      const t = String(i.s).trim();
+      if(/^(CH|\(Hs\))$/i.test(t) && (!xTotais || i.x < xTotais)) xTotais = i.x;
+      if(/^Observa/i.test(t) && (!xObs || i.x < xObs)) xObs = i.x;
+    });
+  });
+  /* margem para o texto que começa um pouco à esquerda do título da coluna */
+  const limiteBatida = xTotais ? xTotais - 14 : 0;
+  const limiteObs = xObs ? xObs - 14 : 0;
 
   const reDia = new RegExp('^(\\d{2}\\/\\d{2}\\/\\d{4})\\s+('+DIAS_SEM+')\\s+(.+)$');
+  const reHora = /\d{1,2}:\d{2}/g;
   const cartoes = [];
   const porChave = {};
   let atual = null;
 
-  linhas.forEach((linha, i)=>{
+  linhas.forEach((linhaObj, i)=>{
+    const linha = linhaObj.t;
     const mNome = linha.match(/Nome:\s*(.+)/);
     if(mNome){
       const nome = limparCampo(mNome[1]).toUpperCase().replace(/\s+/g,' ').trim();
       if(!nome) return;
       /* Cargo e período vêm logo depois do nome. Procurar para trás pegaria os
          dados do funcionário anterior quando dois cabeçalhos estão na mesma página. */
-      const adiante = linhas.slice(i, i+16).join('\n');
-      const atras = linhas.slice(Math.max(0, i-10), i).join('\n');
+      const adiante = linhas.slice(i, i+16).map(x=>x.t).join('\n');
+      const atras = linhas.slice(Math.max(0, i-10), i).map(x=>x.t).join('\n');
       const achar = re => adiante.match(re) || atras.match(re);
       const mPer = achar(/Periodo:\s*(\d{2}\/\d{2}\/\d{4})[\s\S]{0,12}?(\d{2}\/\d{2}\/\d{4})/);
       const chave = nome + '|' + (mPer ? mPer[1] : '');
@@ -4697,32 +4839,62 @@ function extrairCartoes(paginas, nomeArquivo){
     if(!atual) return;
     const m = linha.match(reDia);
     if(!m) return;
-    const resto = m[3];
-    const tempos = resto.match(/\d{1,2}:\d{2}/g) || [];
     if(atual.dias.some(d=>d.data===m[1])) return;   /* cabeçalho repetido */
+    const resto = m[3];
+    const itens = linhaObj.itens || [];
 
-    /* Dia de falta costuma vir sem as quatro colunas de totais no fim da
-       linha — às vezes sem hora nenhuma. Antes a linha era descartada e o dia
-       simplesmente sumia da apuração, e com ele a falta. Agora o dia entra
-       mesmo assim, só sem marcação. */
-    const completo = tempos.length >= 4;   /* sem os totais não dá para ler a carga do dia */
-    const marcas = completo ? tempos.slice(0, tempos.length-4).map(horaParaMin) : [];
-    const fim = completo ? tempos.slice(-4).map(horaParaMin) : [];
-    const corte = tempos.length ? resto.indexOf(tempos[0]) : resto.length;
+    let marcas = [], totais = [], observacao = '';
+    if(limiteBatida && itens.length){
+      /* pela posição das colunas */
+      itens.forEach(it=>{
+        const txt = String(it.s);
+        if(limiteObs && it.x >= limiteObs){ observacao += (observacao?' ':'') + txt.trim(); return; }
+        const horas = txt.match(reHora) || [];
+        if(!horas.length) return;
+        if(it.x < limiteBatida) marcas = marcas.concat(horas);
+        else totais = totais.concat(horas);
+      });
+    }else{
+      /* relatório sem cabeçalho reconhecido: volta à contagem pelo fim */
+      const tempos = resto.match(reHora) || [];
+      const completo = tempos.length >= 4;
+      marcas = completo ? tempos.slice(0, tempos.length-4) : [];
+      totais = completo ? tempos.slice(-4) : [];
+    }
+
+    const emMin = h => horaParaMin(h);
+    const corte = resto.search(reHora);
     atual.dias.push({
       data: m[1], semana: m[2],
-      definicao: resto.slice(0, corte).trim(),
-      marcas, semTotais: !completo,
-      ch: completo ? fim[0] : 0,
-      relDiurno: completo ? fim[1] : 0,
-      relNoturno: completo ? fim[2] : 0,
-      relSaldo: completo ? fim[3] : 0
+      definicao: (corte > 0 ? resto.slice(0, corte) : resto).trim(),
+      marcas: marcas.map(emMin),
+      semTotais: totais.length < 4,
+      ch: totais.length ? emMin(totais[0]) : 0,
+      relDiurno: totais.length > 1 ? emMin(totais[1]) : 0,
+      relNoturno: totais.length > 2 ? emMin(totais[2]) : 0,
+      relSaldo: totais.length > 3 ? emMin(totais[3]) : 0,
+      observacao: observacao.trim(),
+      /* "Declaração" vem com as horas a abonar escritas em Observações */
+      abonoMin: minutosDeAbono(observacao)
     });
   });
 
   return cartoes.filter(c=>c.dias.length);
 }
 
+/* Lê as horas a abonar escritas na coluna Observações do cartão.
+   Aceita 02:00, 2h30, "2 h", e devolve minutos. */
+function minutosDeAbono(texto){
+  const t = String(texto||'');
+  if(!t.trim()) return 0;
+  const hhmm = t.match(/(\d{1,2})\s*:\s*(\d{2})/);
+  if(hhmm) return (+hhmm[1])*60 + (+hhmm[2]);
+  const hm = t.match(/(\d{1,2})\s*h\s*(\d{1,2})?/i);
+  if(hm) return (+hm[1])*60 + (hm[2] ? +hm[2] : 0);
+  const min = t.match(/(\d{1,3})\s*min/i);
+  if(min) return +min[1];
+  return 0;
+}
 
 /* ---------- cálculos cadastrados ---------- */
 const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
@@ -4791,7 +4963,7 @@ function apurar(cartao, cfg, filial){
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
     atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0, diasAbono:0,
-    diasFeriado:0,
+    diasFeriado:0, abonadas:0,
     alertas:[], detalhe:[]
   };
 
@@ -4865,17 +5037,25 @@ function apurar(cartao, cfg, filial){
     if(cem){ r.he100d += extraDiu; r.he100n += extraNot; }
     else   { r.he50d  += extraDiu; r.he50n  += extraNot; }
 
-    /* e minutos faltantes dentro da margem não viram atraso.
-       A tolerância antiga do cálculo continua valendo como piso mínimo, para
-       não afrouxar quem já tinha 10 minutos configurados. */
+    /* Horas abonadas: quando o cartão traz "Declaração" na definição, as horas
+       a abonar vêm escritas em Observações. Elas cobrem o que faltou do dia e
+       não são descontadas — mas também não viram hora extra, por isso entram
+       só até fechar a jornada. Dia abonado sem valor escrito (atestado, por
+       exemplo) cobre o dia inteiro, como antes. */
+    const faltou = Math.max(0, base - trabalhado);
+    const declarado = Math.max(0, +d.abonoMin || 0);
+    const coberto = declarado > 0 ? Math.min(declarado, faltou)
+                  : (abonado ? faltou : 0);
+    if(coberto) r.abonadas += coberto;
+
     let atraso = 0;
-    if(base > 0 && !abonado){
-      const falta = base - trabalhado;
-      if(falta > margem){ atraso = falta; r.atrasos += falta; r.diasAtraso++; }
+    if(base > 0){
+      const resta = faltou - coberto;
+      if(resta > margem){ atraso = resta; r.atrasos += resta; r.diasAtraso++; }
     }
     r.detalhe.push(Object.assign({}, d, {
       tipo: abonado ? 'ABONO' : feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
-      trabalhado, extra, extraNot, atraso,
+      trabalhado, extra, extraNot, atraso, abonadas: coberto,
       naMargem: (sobra > 0 && sobra <= margem) ? sobra
                : (base > trabalhado && base - trabalhado <= margem) ? -(base - trabalhado) : 0
     }));
@@ -4966,7 +5146,8 @@ function gradeCartao(op){
         <table><thead><tr>
           <th style="width:96px">Data</th><th style="width:44px">Dia</th>
           <th>Marcações do dia</th><th style="width:86px">Carga</th>
-          <th style="width:58px">Folga</th><th style="width:58px">Abono</th><th style="width:58px">100%</th>
+          <th style="width:58px">Folga</th><th style="width:58px">Abono</th>
+          <th style="width:86px">Horas abon.</th><th style="width:58px">100%</th>
           <th style="width:150px">Cálculo</th>
         </tr></thead><tbody>
         ${dias.map((d,i)=>`<tr>
@@ -4985,6 +5166,10 @@ function gradeCartao(op){
                      ${d.folga?'checked':''} title="Folga: o dia não conta como falta"></td>
           <td style="text-align:center"><input type="checkbox" class="m-abono" data-i="${i}"
                      ${d.abono?'checked':''} title="Atestado, declaração ou abono: não conta como falta nem gera atraso"></td>
+          <td><input class="entrada m-abonoh" data-i="${i}" placeholder="—"
+                     value="${esc(d.abonoMin ? minParaHora(d.abonoMin) : '')}"
+                     title="Horas a abonar neste dia, como vêm em Observações no cartão"
+                     style="width:78px;font-family:'JetBrains Mono',monospace"></td>
           <td style="text-align:center"><input type="checkbox" class="m-cem" data-i="${i}"
                      ${d.cem?'checked':''} title="Feriado ou dia trabalhado na folga: tudo a 100%"></td>
           <td class="mono" id="mCalc${i}" style="color:var(--apagado)">—</td>
@@ -5024,6 +5209,9 @@ function gradeCartao(op){
       const cem = el.querySelector(`.m-cem[data-i="${i}"]`).checked;
       const folga = el.querySelector(`.m-folga[data-i="${i}"]`).checked;
       const abono = el.querySelector(`.m-abono[data-i="${i}"]`).checked;
+      const abonoTxt = el.querySelector(`.m-abonoh[data-i="${i}"]`).value.trim();
+      const abonoMin = /^\d{1,2}:\d{2}$/.test(abonoTxt) ? horaParaMin(abonoTxt)
+                     : minutosDeAbono(abonoTxt);
       /* sábado de loja de rua tem jornada própria: a grade precisa mostrar a
          mesma carga que o cálculo usa, senão a coluna CH sai errada */
       const filialDoCartao = (S.funcionarios.find(x=>x.id===op.funcionarioId)||{}).filial
@@ -5038,7 +5226,8 @@ function gradeCartao(op){
       const definicao = abono ? (d.definicaoAbono || 'Abono')
         : (folga && !marcas.length) ? 'Folga'
         : (cem || (folga && marcas.length)) ? 'Feriado' : 'Dia Normal';
-      return {data:d.data, semana:d.semana, definicao, marcas, ch, relDiurno:0, relNoturno:0, relSaldo:0};
+      return {data:d.data, semana:d.semana, definicao, marcas, ch, abonoMin,
+              observacao: d.observacao || '', relDiurno:0, relNoturno:0, relSaldo:0};
     });
   };
 
@@ -5057,6 +5246,7 @@ function gradeCartao(op){
       const partes = [minParaHora(d.trabalhado)];
       if(d.extra) partes.push('+'+minParaHora(d.extra));
       if(d.atraso) partes.push('-'+minParaHora(d.atraso));
+      if(d.abonadas) partes.push('abono '+minParaHora(d.abonadas));
       /* dia de dobra: deixa explícito quantos turnos entraram na conta, para
          a conferência não depender de contar batidas no olho */
       if(d.marcas.length > 4) partes.push('· '+Math.floor(d.marcas.length/2)+' turnos');
@@ -5072,10 +5262,11 @@ function gradeCartao(op){
       <div><b style="color:${r.diasFalta?'var(--vermelho)':'inherit'}">${r.diasFalta}</b> faltas</div>
       <div><b>${r.diasFolga}</b> folgas</div>
       ${r.diasFeriado?`<div><b>${r.diasFeriado}</b> feriados</div>`:''}
+      ${r.abonadas?`<div><b>${minParaHora(r.abonadas)}</b> abonadas</div>`:''}
       <div><b>${r.diasAbono}</b> abonos</div>`;
   };
 
-  el.querySelectorAll('.m-batida, .m-ch, .m-cem, .m-folga, .m-abono').forEach(c=>{
+  el.querySelectorAll('.m-batida, .m-ch, .m-cem, .m-folga, .m-abono, .m-abonoh').forEach(c=>{
     c.oninput = atualizar; c.onchange = atualizar;
   });
   el.querySelectorAll('.m-batida').forEach((c,i,todos)=>{
@@ -5161,6 +5352,7 @@ function editarResultado(i){
     domingo: String(d.semana||'').toLowerCase().indexOf('dom')===0,
     sabado: /^s[aá]b/.test(String(d.semana||'').toLowerCase()),
     marcas: (d.marcas||[]).slice(), ch: d.ch,
+    abonoMin: d.abonoMin || 0, observacao: d.observacao || '',
     folga: String(d.definicao||'').toUpperCase() === 'FOLGA',
     abono: RE_ABONO.test(String(d.definicao||'').toUpperCase()),
     definicaoAbono: RE_ABONO.test(String(d.definicao||'').toUpperCase()) ? d.definicao : '',
@@ -5175,7 +5367,10 @@ function editarResultado(i){
     subtitulo:'Corrigir marcações · '+esc(r.arquivo||'digitado'),
     aviso:'Ajuste as batidas e a carga do dia, marque um feriado, ou troque uma falta por '+
           'folga ou abono. Atestado e declaração vindos do cartão já entram como abono. '+
-          'Folga e abono não contam como falta. Os totais mudam na hora.',
+          'Em Horas abon. vêm as horas que o cartão escreveu em Observações na linha da '+
+          'declaração: elas cobrem o que faltou do dia e não são descontadas — o que passar '+
+          'delas continua contando como atraso. Folga e abono não contam como falta. '+
+          'Os totais mudam na hora.',
     dias, nomeArquivo: r.arquivo, cargo: r.cargo,
     funcionarioId: r.funcionarioId, nome: r.nome,
     observacoes: r.observacoes, calculoId: r.calculoId,
@@ -5414,6 +5609,7 @@ function detalheHoras(i){
         <div><b style="color:${r.ap.diasFalta?'var(--vermelho)':'inherit'}">${r.ap.diasFalta}</b> faltas</div>
         <div><b>${r.ap.diasFolga||0}</b> folgas</div>
         ${r.ap.diasFeriado?`<div><b>${r.ap.diasFeriado}</b> feriados</div>`:''}
+        ${r.ap.abonadas?`<div><b>${minParaHora(r.ap.abonadas)}</b> abonadas</div>`:''}
         <div><b>${r.ap.diasAbono||0}</b> abonos (atestado/declaração)</div>
       </div>
       ${r.ap.alertas.length?`<div class="aviso erro">${r.ap.alertas.map(esc).join('<br>')}</div>`:''}
