@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.07f';
+  const VERSAO_APP = '2026.10.07g';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -5239,7 +5239,7 @@ const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
   jornadaSabadoRua:'04:00', jornadaDomingo:'06:00', tolerancia:'10',
   tolEntrada:'5', tolSaida:'5', margemExtra:'NAO',
   noturnoIni:'22:00', noturnoFim:'05:00',
-  base:'CH', domingoExtra:'100', tipoLoja:''};
+  base:'FIXA', domingoExtra:'100', tipoLoja:''};
 
 /* Margem do dia em minutos: entrada + saída. Cálculos antigos, que só têm a
    tolerância única, continuam valendo com ela até alguém salvar os campos
@@ -5282,49 +5282,7 @@ function resumoCalculo(c){
          ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
          ' · margem '+tolPartes(c).entrada+'+'+tolPartes(c).saida+' min'+
          (c.margemExtra==='SIM'?' (atraso e extra)':' (só atraso)')+
-         (c.base==='CH'?' · base CH':'');
-}
-
-/* O cartão imprime a carga horária contratada de cada dia — 08:00 num dia
-   útil, 04:00 num sábado de loja de rua. Quando o cálculo está com jornadas
-   fixas e essa carga não bate, os números saem errados sem ninguém perceber.
-   Esta conferência acha esses dias para avisar na tela. */
-function conferirCargaDoCartao(r){
-  const cfg = calculoPor(r.calculoId);
-  if(cfg.base === 'CH') return null;
-  const filial = filialDoResultado(r);
-  const ehRua = cfg.tipoLoja === 'RUA' ? true
-              : cfg.tipoLoja === 'SHOPPING' ? false
-              : tipoLojaDaFilial(filial) === 'RUA';
-  const fixa = horaParaMin(cfg.jornada);
-  const sab  = horaParaMin(ehRua ? (cfg.jornadaSabadoRua || '04:00')
-                                 : (cfg.jornadaSabado || cfg.jornada));
-  const dom  = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
-
-  let diferentes = 0, exemplo = null;
-  (r.cartao.dias || []).forEach(d=>{
-    if(!(d.marcas||[]).length || !(d.ch > 0)) return;
-    const semana = String(d.semana||'').toLowerCase();
-    const usada = semana.indexOf('dom')===0 ? dom : /^s[aá]b/.test(semana) ? sab : fixa;
-    if(usada === d.ch) return;
-    diferentes++;
-    if(!exemplo) exemplo = {data:d.data, cartao:d.ch, calculo:usada};
-  });
-  return diferentes ? {dias:diferentes, exemplo, calculo:cfg} : null;
-}
-
-function divergenciasDaTela(){
-  const porCalculo = {};
-  S.he.resultados.forEach(r=>{
-    const d = conferirCargaDoCartao(r);
-    if(!d) return;
-    const id = r.calculoId;
-    if(!porCalculo[id]) porCalculo[id] = {nome:calculoPor(id).nome, calculoId:id,
-      cartoes:0, dias:0, exemplo:d.exemplo};
-    porCalculo[id].cartoes++;
-    porCalculo[id].dias += d.dias;
-  });
-  return Object.keys(porCalculo).map(k=>porCalculo[k]);
+         '';
 }
 
 /* ---------- apuração ---------- */
@@ -5385,11 +5343,8 @@ function apurar(cartao, cfg, filial){
       const declarado = Math.max(0, +d.abonoMin || 0);
       if(abonado && declarado > 0){
         const sem = String(d.semana||'').toLowerCase();
-        const baseDia = sem.indexOf('dom') === 0
-              ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
-              : /^s[aá]b/.test(sem)
-              ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
-              : (cfg.base === 'CH' ? d.ch : jornadaFixa);
+        const baseDia = sem.indexOf('dom') === 0 ? jornadaDom
+              : /^s[aá]b/.test(sem) ? jornadaSab : jornadaFixa;
         if(declarado < baseDia){
           const resta = baseDia - declarado;
           r.diasAbono++; r.abonadas += declarado;
@@ -5423,9 +5378,7 @@ function apurar(cartao, cfg, filial){
       (!domingo && !abonado && (d.ch === 0 || def !== 'DIA NORMAL'));
     const cem = feriado || (domingo && cfg.domingoExtra !== '50');
     const base = feriado ? 0
-      : domingo ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
-      : sabado ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
-      : (cfg.base === 'CH' ? d.ch : jornadaFixa);
+      : domingo ? jornadaDom : sabado ? jornadaSab : jornadaFixa;
     /* A margem sempre protege o funcionário do desconto. Se ela também deve
        segurar os minutos a mais (art. 58 §1º da CLT, que manda desprezar a
        variação nos dois sentidos) é escolha de cada cálculo — por padrão não
@@ -5832,15 +5785,6 @@ function tabelaHoras(){
     <div><b style="color:var(--vermelho)">${minParaHora(soma('atrasos'))}</b> atrasos</div>
   </div>
   ${alertas?`<div class="aviso erro">${alertas} marcação(ões) inconsistente(s). Clique no funcionário para ver o dia.</div>`:''}
-  ${divergenciasDaTela().map(d=>`
-    <div class="aviso erro" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-      <span>O cartão traz a carga horária de cada dia, e ela não bate com o cálculo
-        <b>${esc(d.nome)}</b> em ${d.dias} dia(s) de ${d.cartoes} cartão(ões).
-        Em <b>${esc(d.exemplo.data)}</b> o cartão diz <b>${minParaHora(d.exemplo.cartao)}</b>
-        e o cálculo está usando <b>${minParaHora(d.exemplo.calculo)}</b>.</span>
-      <button class="btn mini" data-usar-ch="${esc(d.calculoId)}" style="margin-left:auto">
-        Usar a carga do cartão</button>
-    </div>`).join('')}
   <div class="filial">
     <div class="filial-topo">
       <div><div class="filial-nome">Apuração de ${compBonita(S.competencia)}</div>
@@ -5910,20 +5854,6 @@ function ligarHorasExtras(){
       importarCartoes([...e.dataTransfer.files]); };
   }
   const b = id => document.getElementById(id);
-  document.querySelectorAll('[data-usar-ch]').forEach(x=> x.onclick = async ()=>{
-    const c = calculoPor(x.dataset.usarCh);
-    if(!confirm('Passar o cálculo "'+c.nome+'" a usar a carga horária impressa no cartão?'+
-        '\n\nÉ o que o próprio relógio usa para fechar o saldo de cada dia, e resolve '+
-        'jornada diferente por dia — 8h na semana e 4h no sábado, por exemplo.')) return;
-    carregando(true);
-    try{
-      await api('salvarCalculo', {calculo: Object.assign({}, c, {base:'CH'})});
-      await recarregar();
-      recalcular();
-      toast('O cálculo '+c.nome+' passou a seguir a carga do cartão.');
-    }catch(e){ toast(e.message, true); }
-    finally{ carregando(false); }
-  });
   if(b('heLimpar')) b('heLimpar').onclick = limparCartoes;
   if(b('heExcel')) b('heExcel').onclick = exportarHorasExcel;
   if(b('hePdf')) b('hePdf').onclick = exportarHorasPdf;
@@ -6224,7 +6154,6 @@ async function salvarApuracao(){
       funcionarioId:r.funcionarioId, nome:r.nome, filial:r.filial, cargo:r.cargo,
       periodoIni:r.periodoIni, periodoFim:r.periodoFim,
       calculo:calculoPor(r.calculoId).nome, jornada:calculoPor(r.calculoId).jornada,
-      base:calculoPor(r.calculoId).base,
       diasTrabalhados:r.ap.diasTrabalhados, diasFalta:r.ap.diasFalta, diasAtraso:r.ap.diasAtraso,
       totalTrabalhado:minParaHora(r.ap.trabalhado), he50:minParaHora(r.ap.he50),
       he100:minParaHora(r.ap.he100), heNoturnas:minParaHora(r.ap.heNoturnas),
@@ -6274,10 +6203,6 @@ function linhaCalculo(c, novo){
       <option value="NAO" ${c.margemExtra!=='SIM'?'selected':''}>Só atraso</option>
       <option value="SIM" ${c.margemExtra==='SIM'?'selected':''}>Atraso e extra</option>
     </select></td>
-    <td><select class="entrada" data-c="base">
-      <option value="FIXA" ${c.base!=='CH'?'selected':''}>Jornadas fixas</option>
-      <option value="CH" ${c.base==='CH'?'selected':''}>CH do cartão</option>
-    </select></td>
     <td><select class="entrada" data-c="domingoExtra">
       <option value="100" ${c.domingoExtra!=='50'?'selected':''}>100%</option>
       <option value="50" ${c.domingoExtra==='50'?'selected':''}>50%</option>
@@ -6306,7 +6231,7 @@ function desenharCalculos(el){
         <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Sáb. loja de rua</th><th>Domingo</th>
         <th>Noturno de</th><th>até</th>
         <th>Tol. entrada</th><th>Tol. saída</th><th>Tipo de loja</th><th>Margem vale para</th>
-        <th>Base</th><th>Extra domingo</th><th></th>
+        <th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
       ${linhaCalculo({}, true)}
@@ -6322,8 +6247,6 @@ function desenharCalculos(el){
       quando ela vale: em <b>Rua</b> vale sempre neste cálculo, mesmo que o funcionário
       ainda não esteja cadastrado; em <b>Shopping</b> nunca vale; em <b>Pela filial</b>
       (padrão) vale só para quem trabalha em filial de grupo marcado como Rua.<br>
-      <b>Base</b> escolhe a régua das horas extras:
-      as jornadas cadastradas aqui, ou a carga horária que vem impressa em cada linha do cartão.
       ${Object.keys(usados).length>1?'<br>Nesta apuração há cartões usando cálculos diferentes.':''}
     </div>`;
 
@@ -6338,7 +6261,7 @@ function desenharCalculos(el){
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
       tolEntrada: v('tolEntrada'), tolSaida: v('tolSaida'),
       margemExtra: v('margemExtra'), tipoLoja: v('tipoLoja'),
-      base: v('base'), domingoExtra: v('domingoExtra')
+      domingoExtra: v('domingoExtra')
     };
     if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
     carregando(true);
