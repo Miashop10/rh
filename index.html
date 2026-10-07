@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.06';
+  const VERSAO_APP = '2026.10.06c';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -536,6 +536,22 @@ select.g-campo.sem{color:var(--ambar)}
 }
 .cel-cont::placeholder{color:#b9c0c8;font-style:italic}
 .cel-cont:focus{background:#fffdf5}
+.cel-obs{padding:5px 7px;font-size:13px;width:100%;min-width:150px}
+.cel-obs:focus{background:#fffdf5}
+
+/* tabela única da folha: duas famílias de colunas sob um cabeçalho de grupo */
+.tab-unida{min-width:2080px}
+.tab-unida thead tr.grupo-col th{
+  font-size:9px;letter-spacing:.14em;padding:5px 6px;text-align:center;
+  border-bottom:1px solid var(--linha);background:#f1f3f5;color:var(--apagado);
+}
+.tab-unida thead tr.grupo-col th.g-folha{background:#eef2f7;color:var(--grafite)}
+.tab-unida thead tr.grupo-col th.g-cont{background:#eef4f0;color:var(--verde)}
+.tab-unida thead tr.grupo-col .col-fixa{background:#f1f3f5}
+.tab-unida thead tr.grupo-col th{position:sticky;top:0;z-index:2}
+.tab-unida thead tr:nth-child(2) th{top:22px}
+.tab-unida .cel-folha{min-width:78px}
+.tab-unida .t-total{min-width:84px;text-align:right}
 
 /* ---------- ANEXAR DOCUMENTOS ---------- */
 .linha-anexo{
@@ -813,7 +829,6 @@ const S = {
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
-  folhaParte:'FOLHA',      /* seção aberta dentro da Folha de pagamento */
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] }
 };
@@ -1327,7 +1342,7 @@ function desenhar(){
 
   /* CONTABILIDADE virou seção da folha: some do topo, e quem ainda tinha a
      aba marcada no cadastro passa a entrar pela Folha de pagamento. */
-  if(S.aba==='CONTABILIDADE'){ S.aba='FOLHA'; S.folhaParte='CONTABILIDADE'; }
+  if(S.aba==='CONTABILIDADE') S.aba='FOLHA';
   const nav = document.getElementById('abas');
   nav.innerHTML = S.sessao.abas.filter(a=>a!=='ADMIN' && a!=='CONTABILIDADE').map(a=>
     `<button class="aba ${a===S.aba?'on':''}" data-aba="${a}">${ROTULO_ABA[a]||a}</button>`
@@ -1359,13 +1374,13 @@ function desenhar(){
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
-  else if(S.aba==='FOLHA') c.innerHTML = telaFolhaGeral();
+  else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='COMISSOES') ligarComissoes();
   if(S.aba==='QUEBRAS') ligarQuebras();
-  if(S.aba==='FOLHA') ligarFolhaGeral();
+  if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
 
   /* A janela vem antes: ajustarRolagem mede a altura da tabela a partir da
      posição da página, então devolver a rolagem da janela depois faria a
@@ -2014,7 +2029,8 @@ async function abrirDocumentos(funcId){
     <div class="modal-pe">
       ${podeAprovar()?`
       <button class="btn sec" id="expSel" style="margin-right:auto">Exportar selecionados em PDF</button>
-      <button class="btn sec" id="expTudo">Exportar tudo em PDF</button>`:'<span style="margin-right:auto"></span>'}
+      <button class="btn sec" id="expTudo" title="Junta num PDF só tudo o que já foi anexado para este funcionário, de qualquer mês e de qualquer ano">
+        Exportar a pasta completa${S.docsLista.length?' ('+S.docsLista.length+')':''}</button>`:'<span style="margin-right:auto"></span>'}
       ${podeAprovar()?'<button class="btn" id="aprovarTudo">Aprovar mês inteiro</button>':''}
     </div>`, true);
 
@@ -2030,6 +2046,13 @@ async function abrirDocumentos(funcId){
   const bTudo = el.querySelector('#expTudo');
   if(bTudo) bTudo.onclick = ()=>{
     if(!S.docsLista.length) return toast('Não há documentos para exportar.', true);
+    const comps = [...new Set(S.docsLista.map(d=>d.competencia))].sort();
+    const periodo = comps.length>1
+      ? compBonita(comps[0])+' a '+compBonita(comps[comps.length-1])
+      : compBonita(comps[0]);
+    if(!confirm('Exportar a pasta completa de '+f.nome+'?\n\n'+
+        S.docsLista.length+' documento(s) · '+comps.length+' competência(s) · '+periodo+
+        '\n\nTudo sai num único PDF, na ordem das competências.')) return;
     exportarPdf(S.docsLista.slice(), f, true);
   };
   const ap = el.querySelector('#aprovarTudo');
@@ -2612,7 +2635,46 @@ async function exportarPdf(docs, func, tudo){
     docs = docs.slice().sort((a,b)=>
       a.competencia===b.competencia ? a.tipo.localeCompare(b.tipo) : a.competencia.localeCompare(b.competencia));
 
+    const L=595.28, A=841.89, margem=32, topo=104;
+
+    /* A pasta completa costuma ter dezenas de arquivos de vários anos. Uma
+       folha de rosto com o índice evita ter de folhear o PDF atrás de um mês —
+       e é o que se espera de um documento juntado a processo. */
+    if(tudo && docs.length > 1){
+      const comps = [...new Set(docs.map(d=>d.competencia))].sort();
+      let pg = saida.addPage([L,A]);
+      const logoH2 = 22, logoW2 = logo.width*logoH2/logo.height;
+      pg.drawImage(logo, {x:margem, y:A-56, width:logoW2, height:logoH2});
+      pg.drawText(func.nome, {x:margem, y:A-96, size:17, font:fonteB, color:rgb(.06,.07,.08)});
+      const sub = [func.filial, func.cargo,
+        func.dataAdmissao?'admissão '+dataBonita(func.dataAdmissao):'']
+        .filter(Boolean).join('  ·  ');
+      pg.drawText(sub, {x:margem, y:A-114, size:9.5, font:fonte, color:rgb(.42,.45,.5)});
+      pg.drawText(docs.length+' documento(s) em '+comps.length+' competência(s)  ·  gerado em '+
+        dataBonita(new Date().toISOString().substring(0,10)),
+        {x:margem, y:A-130, size:9.5, font:fonte, color:rgb(.42,.45,.5)});
+      pg.drawLine({start:{x:margem, y:A-142}, end:{x:L-margem, y:A-142},
+        thickness:.6, color:rgb(.86,.88,.9)});
+
+      let y = A-168;
+      const novaFolha = ()=>{ pg = saida.addPage([L,A]); y = A-56; };
+      comps.forEach(c=>{
+        if(y < margem+46) novaFolha();
+        pg.drawText(compBonita(c), {x:margem, y, size:11, font:fonteB, color:rgb(.06,.07,.08)});
+        y -= 15;
+        docs.filter(d=>d.competencia===c).forEach(d=>{
+          if(y < margem+20) novaFolha();
+          pg.drawText('·  '+d.tipo+'   '+(d.arquivoNome||''),
+            {x:margem+12, y, size:9, font:fonte, color:rgb(.3,.33,.37)});
+          y -= 12.5;
+        });
+        y -= 8;
+      });
+    }
+
+    let feitos = 0;
     for(const d of docs){
+      progresso('Montando o PDF… '+(++feitos)+'/'+docs.length);
       await urlArquivo(d.id, true);
       const {bytes, mime} = S.cacheArquivo[d.id];
       if(mime==='application/pdf'){
@@ -2631,7 +2693,6 @@ async function exportarPdf(docs, func, tudo){
         naoConvertidos.push(d.tipo+' '+compBonita(d.competencia));
         continue;
       }
-      const L=595.28, A=841.89, margem=32, topo=104;
       const pg = saida.addPage([L,A]);
       const logoH = 17, logoW = logo.width*logoH/logo.height;
       pg.drawImage(logo, {x:margem, y:A-40, width:logoW, height:logoH});
@@ -2664,7 +2725,7 @@ async function exportarPdf(docs, func, tudo){
       (naoConvertidos.length ? ' · '+naoConvertidos.length+' arquivo(s) em formato não suportado ficaram de fora.' : ''),
       naoConvertidos.length>0);
   }catch(e){ toast(e.message,true); }
-  finally{ carregando(false); }
+  finally{ progresso(null); carregando(false); }
 }
 
 function baixar(blob, nome){
@@ -3458,28 +3519,18 @@ function funcionariosDaFolha(){
 /* As duas telas viraram uma aba só. O conteúdo continua separado — são
    lançamentos diferentes, com salvamentos diferentes — mas agora convivem
    como seções da Folha de pagamento, e não como abas distintas no topo. */
-function telaFolhaGeral(){
-  const parte = S.folhaParte === 'CONTABILIDADE' ? 'CONTABILIDADE' : 'FOLHA';
-  const abas = `
-    <div class="sub-abas" id="folhaPartes">
-      <button class="sub-aba ${parte==='FOLHA'?'on':''}" data-parte="FOLHA">Vale, VT e VR</button>
-      <button class="sub-aba ${parte==='CONTABILIDADE'?'on':''}" data-parte="CONTABILIDADE">Contabilidade</button>
-    </div>`;
-  return abas + (parte==='CONTABILIDADE' ? telaContabilidade() : telaFolha());
-}
-
-function ligarFolhaGeral(){
-  document.querySelectorAll('#folhaPartes .sub-aba').forEach(b=> b.onclick = ()=>{
-    S.folhaParte = b.dataset.parte;
-    desenhar();
-  });
-  if(S.folhaParte === 'CONTABILIDADE') ligarContabilidade(); else ligarFolha();
-}
-
+/* As duas telas viraram uma só: cada funcionário em uma linha, com os campos
+   de vale/VT/VR e os lançamentos da contabilidade lado a lado. São dois
+   registros diferentes no banco (FOLHA e CONTABILIDADE) e continuam sendo
+   gravados separadamente — o que mudou é que se preenche tudo de uma vez. */
 function telaFolha(){
   if(S.folha.competencia !== S.competencia){
     carregarFolha();
     return `<div class="filial"><div class="vazio">Carregando a folha de ${compBonita(S.competencia)}…</div></div>`;
+  }
+  if(S.cont.competencia !== S.competencia){
+    carregarContabilidade();
+    return `<div class="filial"><div class="vazio">Carregando os lançamentos de ${compBonita(S.competencia)}…</div></div>`;
   }
   const lista = funcionariosDaFolha();
   const ops = ['<option value="TODAS">Todas as filiais</option>']
@@ -3503,74 +3554,104 @@ function telaFolha(){
                value="${esc(S.folha.diasShop||'')}" style="width:72px"></div>
       <button class="btn sec" id="folhaAplicar">Preencher dias</button>
     </div>
+    <button class="btn sec" id="contPuxar">Puxar horas extras</button>
     <button class="btn sec" id="folhaExcel">Excel</button>
-    <button class="btn sec" id="folhaPdf">PDF</button>
-    <button class="btn" id="folhaSalvar">Salvar folha</button>
+    <button class="btn sec" id="folhaPdf">PDF folha</button>
+    <button class="btn sec" id="contPdf">PDF contáb.</button>
+    <button class="btn" id="folhaSalvar">Salvar</button>
   </div>
   <div class="aviso info">
     Folha de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
     <b>Vale, VT e VR</b> repetem o último valor lançado — em cinza itálico quando vêm do
-    mês anterior. Digite por cima para mudar: o novo valor passa a valer dali em diante
-    e os meses já salvos ficam como estão. Sem lançamento nenhum, valem os valores do
-    grupo da filial.
+    mês anterior. As colunas em verde são preenchidas por outras abas: horas extras,
+    adicional noturno, faltas e atrasos vêm de Horas extras; comissões vêm de Comissões;
+    quebra de produtos vem de Quebras. Tudo pode ser corrigido à mão, e <b>Salvar</b>
+    grava a folha e os lançamentos de uma vez.
   </div>
   ${semGrupo.length ? `<div class="aviso erro">Sem grupo de valores definido:
     <b>${semGrupo.map(esc).join(', ')}</b>. Defina o grupo de cada filial na tabela
     de valores, no pé desta aba.</div>` : ''}`;
 
-  if(lista.length){
-    html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
-      <table class="tab-folha"><thead><tr>
-        <th>Funcionário</th><th>Filial</th><th>VT</th><th>Dias</th><th>Total VT</th>
-        <th>VR</th><th>Total VR</th><th>Vale mensal</th><th style="width:104px">Quer vale?</th><th>Observações</th>
-      </tr></thead><tbody>
-      ${lista.map(f=>{
-        const d = linhaFolhaDe(f);
-        return `<tr>
-          <td class="t-nome">${esc(f.nome)}</td>
-          <td class="t-apagado" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
-          <td><input class="entrada cel-folha dinheiro ${d.vtHerdado?'herdado':''}"
-                     data-f="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
-                     title="${d.vtMes?'valor fechado do mês':'valor por dia'}${d.vtHerdado?' · repetido do mês anterior':''}">
-              ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
-          <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
-                     value="${esc(d.dias)}"></td>
-          <td class="mono t-total">${moeda(d.totalVt)}</td>
-          <td><input class="entrada cel-folha dinheiro ${d.vrHerdado?'herdado':''}"
-                     data-f="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
-                     title="${d.vrMes?'valor fechado do mês':'valor por dia'}${d.vrHerdado?' · repetido do mês anterior':''}">
-              ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
-          <td class="mono t-total">${moeda(d.totalVr)}</td>
-          <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
-                     data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
-                     title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
-                     ${f.recebeVale==='NAO'?'disabled':''}></td>
-          <td><select class="entrada cel-vale ${f.recebeVale==='NAO'?'nao':''}" data-vale="${f.id}">
-            <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
-            <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
-          </select></td>
-          <td><input class="entrada cel-folha" data-f="${f.id}" data-campo="observacoes"
-                     value="${esc(d.observacoes)}" placeholder="Anotação"></td>
-        </tr>`;
-      }).join('')}
-      </tbody><tfoot><tr>
-        <td><b>TOTAL</b></td><td></td><td></td>
-        <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)}</b></td>
-        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
-        <td></td>
-        <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
-        <td class="mono"><b>${moeda(lista.reduce((s,f)=>
-          s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
-        <td class="mono" style="text-align:center;color:var(--apagado)">${
-          lista.filter(f=>f.recebeVale==='NAO').length} sem</td>
-        <td></td>
-      </tr></tfoot></table></div></div>`;
-  }else{
+  if(!lista.length){
     html += vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
+    return html + painelGrupos();
   }
 
-  html += painelGrupos();
-  return html;
+  html += `<div class="painel" style="padding:0">
+    <div class="previa" style="max-height:none;border:none">
+    <table class="tab-cont tab-unida"><thead>
+      <tr class="grupo-col">
+        <th class="col-fixa"></th><th></th>
+        <th colspan="7" class="g-folha">VALE, VT E VR</th>
+        <th colspan="${COLS_CONT.length}" class="g-cont">CONTABILIDADE</th>
+        <th></th>
+      </tr>
+      <tr>
+        <th class="col-fixa">Funcionário</th><th>Filial</th>
+        <th>VT</th><th>Dias</th><th>Total VT</th><th>VR</th><th>Total VR</th>
+        <th>Vale mensal</th><th style="min-width:92px">Quer vale?</th>
+        ${COLS_CONT.map(c=>`<th class="${c.puxa?'col-auto':''}">${esc(c.titulo)}</th>`).join('')}
+        <th style="min-width:170px">Observações</th>
+      </tr></thead><tbody>`;
+
+  lista.forEach(f=>{
+    const d = linhaFolhaDe(f);
+    const l = S.cont.linhas[f.id] || {};
+    const ap = apuracaoDe(f);
+    html += `<tr>
+      <td class="col-fixa"><b>${esc(f.nome)}</b></td>
+      <td style="color:var(--apagado)" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
+      <td><input class="entrada cel-folha dinheiro ${d.vtHerdado?'herdado':''}"
+                 data-f="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
+                 title="${d.vtMes?'valor fechado do mês':'valor por dia'}${d.vtHerdado?' · repetido do mês anterior':''}">
+          ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
+      <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
+                 value="${esc(d.dias)}"></td>
+      <td class="mono t-total">${moeda(d.totalVt)}</td>
+      <td><input class="entrada cel-folha dinheiro ${d.vrHerdado?'herdado':''}"
+                 data-f="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
+                 title="${d.vrMes?'valor fechado do mês':'valor por dia'}${d.vrHerdado?' · repetido do mês anterior':''}">
+          ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
+      <td class="mono t-total">${moeda(d.totalVr)}</td>
+      <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
+                 data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
+                 title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
+                 ${f.recebeVale==='NAO'?'disabled':''}></td>
+      <td><select class="entrada cel-vale ${f.recebeVale==='NAO'?'nao':''}" data-vale="${f.id}">
+        <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
+        <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
+      </select></td>
+      ${COLS_CONT.map(c=>`<td class="${c.puxa?'col-auto':''}">
+        <input class="entrada cel-cont ${c.tipo}" data-f="${f.id}" data-campo="${c.campo}"
+               value="${esc(l[c.campo]||'')}"
+               placeholder="${c.puxa && ap && ap[c.campo] ? esc(ap[c.campo]) : ''}"
+               title="${c.puxa && ap ? 'Da apuração: '+esc(ap[c.campo]||'—') : ''}"></td>`).join('')}
+      <td><input class="entrada cel-obs" data-f="${f.id}" data-campo="observacoes"
+                 value="${esc(l.observacoes || d.observacoes || '')}" placeholder="Anotação"></td>
+    </tr>`;
+  });
+
+  const soma = campo => lista.map(f=>(S.cont.linhas[f.id]||{})[campo]);
+  html += `</tbody><tfoot><tr>
+      <td class="col-fixa"><b>TOTAL</b></td><td></td>
+      <td></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)}</b></td>
+      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
+      <td></td>
+      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
+      <td class="mono"><b>${moeda(lista.reduce((s,f)=>
+        s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
+      <td class="mono" style="text-align:center;color:var(--apagado)">${
+        lista.filter(f=>f.recebeVale==='NAO').length} sem</td>
+      ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
+        c.tipo==='hora' ? somaHoras(soma(c.campo))
+        : c.tipo==='numero' ? String(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+        : moeda(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+      }</b></td>`).join('')}
+      <td></td>
+    </tr></tfoot></table></div></div>`;
+
+  return html + painelGrupos();
 }
 
 function painelGrupos(){
@@ -3707,7 +3788,7 @@ function ligarFolha(){
     finally{ carregando(false); }
   });
 
-  if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolha;
+  if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolhaCompleta;
   if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
   if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
 
@@ -3799,7 +3880,7 @@ function atualizarTotaisFolha(){
   }
 }
 
-async function salvarFolha(){
+async function salvarFolha(silencioso){
   const lista = funcionariosDaFolha();
   const itens = lista.map(f=>{
     const d = linhaFolhaDe(f);
@@ -3814,7 +3895,10 @@ async function salvarFolha(){
     };
   }).filter(it=> it._mexido || it.dias || it.vale || it.observacoes)
     .map(it=>{ delete it._mexido; return it; });
-  if(!itens.length) return toast('Preencha ao menos os dias de alguém antes de salvar.', true);
+  if(!itens.length){
+    if(!silencioso) toast('Preencha ao menos os dias de alguém antes de salvar.', true);
+    return {salvos:0};
+  }
   carregando(true);
   try{
     const r = await api('salvarFolha', {competencia:S.competencia, itens});
@@ -3827,9 +3911,13 @@ async function salvarFolha(){
       if(it.vrDiario) f.vrPadrao = it.vrDiario;
     });
     desenhar();
-    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+
+    if(!silencioso) toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+
           '. Vale, VT e VR repetem nos próximos meses.');
-  }catch(e){ toast(e.message, true); }
+    return {salvos:r.salvos};
+  }catch(e){
+    if(!silencioso) toast(e.message, true);
+    return {erro:e.message};
+  }
   finally{ carregando(false); }
 }
 
@@ -3850,15 +3938,48 @@ function tabelaFolha(){
   return {cab, linhas, total};
 }
 
+/* A planilha sai como a tela: uma linha por funcionário, com as colunas de
+   vale/VT/VR e as da contabilidade lado a lado. */
+function tabelaFolhaUnida(){
+  const lista = funcionariosDaFolha();
+  const cab = ['FUNCIONÁRIO','FILIAL','GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR',
+               'VALE MENSAL','QUER VALE']
+    .concat(COLS_CONT.map(c=>c.titulo)).concat(['OBSERVAÇÕES']);
+  const linhas = lista.map(f=>{
+    const d = linhaFolhaDe(f);
+    const l = S.cont.linhas[f.id] || {};
+    return [f.nome, f.filial, d.grupo, d.vtDiario, d.dias, moeda(d.totalVt),
+            d.vrDiario, moeda(d.totalVr),
+            f.recebeVale==='NAO' ? '' : d.vale,
+            f.recebeVale==='NAO' ? 'NÃO' : 'SIM']
+      .concat(COLS_CONT.map(c=>l[c.campo]||''))
+      .concat([l.observacoes || d.observacoes || '']);
+  });
+  const total = ['TOTAL','','','',
+    String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
+    moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
+    moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0)),
+    moeda(lista.reduce((s,f)=> s + (f.recebeVale==='NAO'?0:valorNum(linhaFolhaDe(f).vale)),0)), '']
+    .concat(COLS_CONT.map(c=>{
+      const vals = lista.map(f=>(S.cont.linhas[f.id]||{})[c.campo]);
+      return c.tipo==='hora' ? somaHoras(vals)
+           : c.tipo==='numero' ? String(vals.reduce((s,v)=>s+valorNum(v),0))
+           : moeda(vals.reduce((s,v)=>s+valorNum(v),0));
+    })).concat(['']);
+  return {cab, linhas, total};
+}
+
 async function exportarFolhaExcel(){
   await usar('xlsx');
-  const {cab, linhas, total} = tabelaFolha();
+  const {cab, linhas, total} = tabelaFolhaUnida();
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:18},{wch:24},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},{wch:14},{wch:11},{wch:30}];
+  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},
+                 {wch:14},{wch:11}]
+    .concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
-  toast('Planilha gerada.');
+  toast('Planilha gerada com a folha e os lançamentos.');
 }
 
 async function exportarFolhaPdf(){
@@ -4074,6 +4195,16 @@ async function carregarContabilidade(){
 }
 
 function ligarContabilidade(){
+  /* Observações é uma coluna só na tela, mas vai para os dois registros: o da
+     folha e o da contabilidade. Assim a anotação aparece em qualquer um dos
+     dois relatórios, sem o RH ter de digitar duas vezes. */
+  document.querySelectorAll('.cel-obs').forEach(c=>{
+    c.oninput = ()=>{
+      const id = c.dataset.f;
+      (S.cont.linhas[id] || (S.cont.linhas[id] = {funcionarioId:id})).observacoes = c.value;
+      (S.folha.linhas[id] || (S.folha.linhas[id] = {funcionarioId:id})).observacoes = c.value;
+    };
+  });
   document.querySelectorAll('.cel-cont').forEach(c=>{
     c.oninput = ()=>{
       const l = S.cont.linhas[c.dataset.f] || (S.cont.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
@@ -4092,6 +4223,19 @@ function ligarContabilidade(){
   if(b('contPdf')) b('contPdf').onclick = exportarContPdf;
 }
 
+/* Um clique grava os dois lados. São duas abas distintas na planilha, com
+   regras próprias — por isso duas chamadas — mas para quem usa é um Salvar só. */
+async function salvarFolhaCompleta(){
+  const a = await salvarFolha(true);
+  const b = await salvarContabilidade(true);
+  const erros = [a.erro, b.erro].filter(Boolean);
+  if(erros.length) return toast(erros.join(' · '), true);
+  const total = (a.salvos||0) + (b.salvos||0);
+  if(!total) return toast('Não há nada preenchido para salvar.', true);
+  toast('Salvo em '+compBonita(S.competencia)+' · '+(a.salvos||0)+' em vale/VT/VR e '+
+        (b.salvos||0)+' na contabilidade. Vale, VT e VR repetem nos próximos meses.');
+}
+
 function puxarHorasExtras(){
   let n = 0;
   linhasContabilidade().forEach(f=>{
@@ -4106,7 +4250,7 @@ function puxarHorasExtras(){
           : 'Nenhuma apuração encontrada para esta competência.', !n);
 }
 
-async function salvarContabilidade(){
+async function salvarContabilidade(silencioso){
   const lista = linhasContabilidade();
   const itens = lista.map(f=>{
     const l = S.cont.linhas[f.id] || {};
@@ -4115,12 +4259,19 @@ async function salvarContabilidade(){
       {observacoes: l.observacoes||''});
   }).filter(it=> COLS_CONT.some(c=>it[c.campo]) || it.observacoes);
 
-  if(!itens.length) return toast('Não há nada preenchido para salvar.', true);
+  if(!itens.length){
+    if(!silencioso) toast('Não há nada preenchido para salvar.', true);
+    return {salvos:0};
+  }
   carregando(true);
   try{
     const r = await api('salvarContabilidade', {competencia:S.competencia, itens});
-    toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+'.');
-  }catch(e){ toast(e.message, true); }
+    if(!silencioso) toast(r.salvos+' lançamentos salvos em '+compBonita(S.competencia)+'.');
+    return {salvos:r.salvos};
+  }catch(e){
+    if(!silencioso) toast(e.message, true);
+    return {erro:e.message};
+  }
   finally{ carregando(false); }
 }
 
