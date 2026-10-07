@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.07g';
+  const VERSAO_APP = '2026.10.07h';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -5269,15 +5269,20 @@ function tipoLojaDaFilial(filial){
   return g ? String(g.tipoLoja || '').toUpperCase().trim() : '';
 }
 
+/* A jornada de sábado do cálculo. Cálculos antigos marcados como loja de rua
+   guardavam esse número num campo à parte; aqui ele continua valendo até o
+   cálculo ser salvo de novo, quando passa para o campo Sábado. */
+function jornadaDeSabado(c){
+  if(c.tipoLoja === 'RUA' && c.jornadaSabadoRua) return c.jornadaSabadoRua;
+  return c.jornadaSabado || c.jornada;
+}
+
 function calculoPor(id){
   return S.he.calculos.find(c=>c.id===id) || S.he.calculos[0] || CALCULO_PADRAO;
 }
 function calculoAtual(){ return calculoPor(S.he.calculoId); }
 function resumoCalculo(c){
-  return c.jornada+' · sáb '+(c.jornadaSabado||c.jornada)+
-         (c.tipoLoja==='RUA' ? ' (rua '+(c.jornadaSabadoRua||'04:00')+', sempre)'
-          : c.tipoLoja==='SHOPPING' ? ' (shopping, sempre)'
-          : ' (rua '+(c.jornadaSabadoRua||'04:00')+', pela filial)')+
+  return c.jornada+' · sáb '+jornadaDeSabado(c)+
          ' · dom '+c.jornadaDomingo+' ('+(c.domingoExtra==='50'?'50':'100')+'%)'+
          ' · noturno '+c.noturnoIni+'–'+c.noturnoFim+
          ' · margem '+tolPartes(c).entrada+'+'+tolPartes(c).saida+' min'+
@@ -5289,15 +5294,9 @@ function resumoCalculo(c){
 function apurar(cartao, cfg, filial){
   const notIni = horaParaMin(cfg.noturnoIni), notFim = horaParaMin(cfg.noturnoFim);
   const jornadaFixa = horaParaMin(cfg.jornada);
-  /* Loja de rua abre meio período no sábado. Quem decide é o próprio cálculo
-     quando ele diz de que tipo de loja é; deixado em branco, vale o grupo da
-     filial do funcionário. Antes só havia o caminho pela filial, e um cartão
-     de funcionário ainda não cadastrado caía na jornada cheia de sábado. */
-  const ehRua = cfg.tipoLoja === 'RUA' ? true
-              : cfg.tipoLoja === 'SHOPPING' ? false
-              : tipoLojaDaFilial(filial || cartao.filial) === 'RUA';
-  const jornadaSab = horaParaMin(
-    ehRua ? (cfg.jornadaSabadoRua || '04:00') : (cfg.jornadaSabado || cfg.jornada));
+  /* Sábado tem a jornada que o cálculo diz, e só ela. Loja de rua que fecha
+     meio período no sábado tem o seu próprio cálculo, com Sábado = 04:00. */
+  const jornadaSab = horaParaMin(jornadaDeSabado(cfg));
   const jornadaDom = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
   const tol = +cfg.tolerancia;
   /* Margem do dia: soma da tolerância de entrada com a de saída. Dentro dela
@@ -5573,16 +5572,10 @@ function gradeCartao(op){
       const abonoTxt = el.querySelector(`.m-abonoh[data-i="${i}"]`).value.trim();
       const abonoMin = /^\d{1,2}:\d{2}$/.test(abonoTxt) ? horaParaMin(abonoTxt)
                      : minutosDeAbono(abonoTxt);
-      /* sábado de loja de rua tem jornada própria: a grade precisa mostrar a
-         mesma carga que o cálculo usa, senão a coluna CH sai errada */
-      const filialDoCartao = (S.funcionarios.find(x=>x.id===op.funcionarioId)||{}).filial
-                             || op.filial || '';
-      const sabRua = cfg.tipoLoja === 'RUA' ? true
-                   : cfg.tipoLoja === 'SHOPPING' ? false
-                   : tipoLojaDaFilial(filialDoCartao) === 'RUA';
+      /* a grade mostra a mesma jornada que o cálculo usa, senão a coluna CH
+         da digitação sai diferente da apuração */
       const padrao = d.domingo ? (cfg.jornadaDomingo || cfg.jornada)
-                   : d.sabado ? (sabRua ? (cfg.jornadaSabadoRua || '04:00')
-                                        : (cfg.jornadaSabado || cfg.jornada))
+                   : d.sabado ? jornadaDeSabado(cfg)
                    : cfg.jornada;
       const ch = cem ? 0 : (/^\d{1,2}:\d{2}$/.test(chTxt) ? horaParaMin(chTxt) : horaParaMin(padrao));
       /* folga só vale enquanto não há batida; com batida o dia é trabalho na folga */
@@ -6185,8 +6178,8 @@ function linhaCalculo(c, novo){
     <td><input class="entrada" data-c="nome" value="${esc(c.nome||'')}"
                placeholder="${novo?'Ex.: CALCULO 02':''}" style="min-width:130px"></td>
     <td><input class="entrada mono" data-c="jornada" value="${esc(c.jornada||'07:20')}" style="width:72px"></td>
-    <td><input class="entrada mono" data-c="jornadaSabado" value="${esc(c.jornadaSabado||c.jornada||'07:20')}" style="width:72px"></td>
-    <td><input class="entrada mono" data-c="jornadaSabadoRua" value="${esc(c.jornadaSabadoRua||'04:00')}" style="width:72px"></td>
+    <td><input class="entrada mono" data-c="jornadaSabado"
+               value="${esc(novo ? '07:20' : jornadaDeSabado(c) || '07:20')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="jornadaDomingo" value="${esc(c.jornadaDomingo||'06:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoIni" value="${esc(c.noturnoIni||'22:00')}" style="width:72px"></td>
     <td><input class="entrada mono" data-c="noturnoFim" value="${esc(c.noturnoFim||'05:00')}" style="width:72px"></td>
@@ -6194,11 +6187,6 @@ function linhaCalculo(c, novo){
                value="${esc(String(tolPartes(novo?{}:c).entrada))}" style="width:64px"></td>
     <td><input class="entrada mono" type="number" min="0" max="60" data-c="tolSaida"
                value="${esc(String(tolPartes(novo?{}:c).saida))}" style="width:64px"></td>
-    <td><select class="entrada" data-c="tipoLoja">
-      <option value="" ${!c.tipoLoja?'selected':''}>Pela filial</option>
-      <option value="RUA" ${c.tipoLoja==='RUA'?'selected':''}>Rua</option>
-      <option value="SHOPPING" ${c.tipoLoja==='SHOPPING'?'selected':''}>Shopping</option>
-    </select></td>
     <td><select class="entrada" data-c="margemExtra">
       <option value="NAO" ${c.margemExtra!=='SIM'?'selected':''}>Só atraso</option>
       <option value="SIM" ${c.margemExtra==='SIM'?'selected':''}>Atraso e extra</option>
@@ -6228,9 +6216,9 @@ function desenharCalculos(el){
     </div>
     <div class="previa" style="max-height:none">
       <table class="tab-calc"><thead><tr>
-        <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Sáb. loja de rua</th><th>Domingo</th>
+        <th>Nome</th><th>Seg a sex</th><th>Sábado</th><th>Domingo</th>
         <th>Noturno de</th><th>até</th>
-        <th>Tol. entrada</th><th>Tol. saída</th><th>Tipo de loja</th><th>Margem vale para</th>
+        <th>Tol. entrada</th><th>Tol. saída</th><th>Margem vale para</th>
         <th>Extra domingo</th><th></th>
       </tr></thead><tbody>
       ${S.he.calculos.map(c=>linhaCalculo(c)).join('')}
@@ -6243,10 +6231,9 @@ function desenharCalculos(el){
       em <b>Só atraso</b> (padrão) a margem apenas evita o desconto, e toda hora extra é
       paga desde o primeiro minuto; em <b>Atraso e extra</b> os minutos a mais dentro da
       margem também não são pagos, como manda o art. 58 §1º da CLT.<br>
-      <b>Sáb. loja de rua</b> é a jornada reduzida de sábado. <b>Tipo de loja</b> decide
-      quando ela vale: em <b>Rua</b> vale sempre neste cálculo, mesmo que o funcionário
-      ainda não esteja cadastrado; em <b>Shopping</b> nunca vale; em <b>Pela filial</b>
-      (padrão) vale só para quem trabalha em filial de grupo marcado como Rua.<br>
+      <b>Sábado</b> é a jornada de sábado deste cálculo, e é ela que vale sempre.
+      Loja de rua que abre meio período no sábado tem o seu próprio cálculo, com
+      <b>Sábado 04:00</b> — basta escolher esse cálculo nos cartões dessas lojas.<br>
       ${Object.keys(usados).length>1?'<br>Nesta apuração há cartões usando cálculos diferentes.':''}
     </div>`;
 
@@ -6256,11 +6243,14 @@ function desenharCalculos(el){
     const calculo = {
       id: tr.dataset.novo ? '' : tr.dataset.calcId,
       nome: v('nome'), jornada: v('jornada'),
-      jornadaSabado: v('jornadaSabado'), jornadaSabadoRua: v('jornadaSabadoRua'),
+      jornadaSabado: v('jornadaSabado'),
+      /* o cálculo salvo não carrega mais a marcação de tipo de loja: o campo
+         Sábado já traz a jornada que vale */
+      jornadaSabadoRua: '', tipoLoja: '',
       jornadaDomingo: v('jornadaDomingo'),
       noturnoIni: v('noturnoIni'), noturnoFim: v('noturnoFim'),
       tolEntrada: v('tolEntrada'), tolSaida: v('tolSaida'),
-      margemExtra: v('margemExtra'), tipoLoja: v('tipoLoja'),
+      margemExtra: v('margemExtra'),
       domingoExtra: v('domingoExtra')
     };
     if(!calculo.nome.trim()) return toast('Dê um nome ao cálculo.', true);
