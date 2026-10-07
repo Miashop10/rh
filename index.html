@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.07h';
+  const VERSAO_APP = '2026.10.07i';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -5314,6 +5314,11 @@ function apurar(cartao, cfg, filial){
     const defDia = String(d.definicao||'').toUpperCase();
     const folga = defDia==='FOLGA';
     const abonado = RE_ABONO.test(defDia);
+    const semana = String(d.semana||'').toLowerCase();
+    const domingo = semana.indexOf('dom') === 0;
+    const sabado = /^s[aá]b/.test(semana);
+    /* a jornada que este dia tem de cumprir, tirada do cálculo e de mais nada */
+    const jornadaDia = domingo ? jornadaDom : sabado ? jornadaSab : jornadaFixa;
     let mc = d.marcas.slice();
     if(mc.length % 2){
       r.alertas.push(d.data+': número ímpar de marcações, a última foi ignorada.');
@@ -5341,15 +5346,14 @@ function apurar(cartao, cfg, filial){
          margem de tolerância proteger, então o resto é descontado inteiro. */
       const declarado = Math.max(0, +d.abonoMin || 0);
       if(abonado && declarado > 0){
-        const sem = String(d.semana||'').toLowerCase();
-        const baseDia = sem.indexOf('dom') === 0 ? jornadaDom
-              : /^s[aá]b/.test(sem) ? jornadaSab : jornadaFixa;
+        const baseDia = jornadaDia;
         if(declarado < baseDia){
           const resta = baseDia - declarado;
           r.diasAbono++; r.abonadas += declarado;
           r.atrasos += resta; r.diasAtraso++;
           r.detalhe.push(Object.assign({}, d, {tipo:'ABONO PARCIAL',
-            trabalhado:0, extra:0, extraNot:0, atraso:resta, abonadas:declarado}));
+            jornada:baseDia, trabalhado:0, extra:0, extraNot:0,
+            atraso:resta, abonadas:declarado}));
           return;
         }
       }
@@ -5360,6 +5364,7 @@ function apurar(cartao, cfg, filial){
       else if(tipoDia === 'FERIADO') r.diasFeriado++;
       else r.diasFalta++;
       r.detalhe.push(Object.assign({}, d, {tipo: tipoDia,
+        jornada: tipoDia === 'FALTA' ? jornadaDia : 0,
         trabalhado:0, extra:0, extraNot:0, atraso:0}));
       return;
     }
@@ -5367,17 +5372,13 @@ function apurar(cartao, cfg, filial){
     r.trabalhado += trabalhado; r.noturno += noturno; r.diasTrabalhados++;
 
     const def = defDia;
-    const semana = String(d.semana||'').toLowerCase();
-    const domingo = semana.indexOf('dom') === 0;
-    const sabado = /^s[aá]b/.test(semana);
     /* Domingo é dia útil com jornada própria: só o que passa dela é extra.
        Um domingo que também seja feriado precisa da marcação 100% na edição.
        Dia abonado que teve marcação conta como dia comum, não como feriado. */
     const feriado = def === 'FERIADO' ||
       (!domingo && !abonado && (d.ch === 0 || def !== 'DIA NORMAL'));
     const cem = feriado || (domingo && cfg.domingoExtra !== '50');
-    const base = feriado ? 0
-      : domingo ? jornadaDom : sabado ? jornadaSab : jornadaFixa;
+    const base = feriado ? 0 : jornadaDia;
     /* A margem sempre protege o funcionário do desconto. Se ela também deve
        segurar os minutos a mais (art. 58 §1º da CLT, que manda desprezar a
        variação nos dois sentidos) é escolha de cada cálculo — por padrão não
@@ -5415,6 +5416,7 @@ function apurar(cartao, cfg, filial){
     }
     r.detalhe.push(Object.assign({}, d, {
       tipo: abonado ? 'ABONO' : feriado ? '100%' : domingo ? (cem?'DOM 100%':'DOM 50%') : 'NORMAL',
+      jornada: base,
       trabalhado, extra, extraNot, atraso, abonadas: coberto,
       naMargem: (sobra > 0 && sobra <= margem) ? sobra
                : (base > trabalhado && base - trabalhado <= margem) ? -(base - trabalhado) : 0
@@ -5746,6 +5748,11 @@ function telaHorasExtras(){
         ${S.he.calculos.map(x=>`<option value="${esc(x.id)}" ${x.id===S.he.calculoId?'selected':''}>${esc(x.nome)}</option>`).join('')}
       </select>
     </div>
+    ${podeAprovar()?`
+    <div style="min-width:130px">
+      <label class="campo-lbl" for="heSabado">Jornada de sábado</label>
+      <input class="entrada mono" id="heSabado" value="${esc(jornadaDeSabado(c)||'07:20')}">
+    </div>`:''}
     <div style="flex:2;min-width:240px">
       <label class="campo-lbl">Regras deste cálculo</label>
       <div class="mono" style="font-size:12px;color:var(--apagado);padding:10px 0">${esc(resumoCalculo(c))}</div>
@@ -5847,6 +5854,23 @@ function ligarHorasExtras(){
       importarCartoes([...e.dataTransfer.files]); };
   }
   const b = id => document.getElementById(id);
+  /* a jornada de sábado é o ajuste que mais se mexe: fica à mão na barra,
+     e salvar aqui é o mesmo que salvá-la em Gerenciar cálculos */
+  if(b('heSabado')) b('heSabado').onchange = async ()=>{
+    const c = calculoAtual();
+    const valor = b('heSabado').value.trim();
+    if(!/^\d{1,2}:\d{2}$/.test(valor)) return toast('Escreva a jornada como 04:00.', true);
+    if(valor === jornadaDeSabado(c)) return;
+    carregando(true);
+    try{
+      await api('salvarCalculo', {calculo: Object.assign({}, c,
+        {jornadaSabado: valor, jornadaSabadoRua: '', tipoLoja: ''})});
+      await recarregar();
+      recalcular();
+      toast('Sábado do cálculo '+c.nome+' agora é '+valor+'.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  };
   if(b('heLimpar')) b('heLimpar').onclick = limparCartoes;
   if(b('heExcel')) b('heExcel').onclick = exportarHorasExcel;
   if(b('hePdf')) b('hePdf').onclick = exportarHorasPdf;
@@ -5979,7 +6003,8 @@ function detalheHoras(i){
       <div class="previa">
         <table><thead><tr>
           <th>Data</th><th>Dia</th><th>Definição</th><th>Marcações</th>
-          <th>Trabalhado</th><th>CH</th><th>Abonado</th><th>Extra</th><th>Extra not.</th><th>Atraso</th>
+          <th>Trabalhado</th><th>Jornada</th><th>CH do cartão</th><th>Abonado</th>
+          <th>Extra</th><th>Extra not.</th><th>Atraso</th>
         </tr></thead><tbody>
         ${r.ap.detalhe.map(d=>`<tr>
           <td class="mono">${esc(d.data)}</td><td>${esc(d.semana)}</td>
@@ -5991,7 +6016,11 @@ function detalheHoras(i){
                 : esc(d.definicao)}</td>
           <td class="mono" style="color:var(--apagado)">${d.marcas.map(minParaHora).join(' · ')||'—'}</td>
           <td class="mono">${minParaHora(d.trabalhado)}</td>
-          <td class="mono" style="color:var(--apagado)">${minParaHora(d.ch)}</td>
+          <td class="mono"><b>${minParaHora(d.jornada||0)}</b></td>
+          <td class="mono" style="color:${(d.ch>0 && d.jornada>0 && d.ch!==d.jornada)?'var(--ambar)':'var(--apagado)'}"
+              ${(d.ch>0 && d.jornada>0 && d.ch!==d.jornada)
+                ?`title="O cartão imprimiu ${minParaHora(d.ch)} de carga neste dia e o cálculo está usando ${minParaHora(d.jornada)}."`:''}
+              >${minParaHora(d.ch)}</td>
           <td class="mono" style="color:${d.abonadas?'var(--ambar)':'var(--apagado)'}"
               ${d.observacao?`title="${esc(d.observacao)}"`:''}>${d.abonadas?minParaHora(d.abonadas):'—'}</td>
           <td class="mono" style="color:${d.extra?'var(--verde)':'inherit'}">${minParaHora(d.extra)}</td>
