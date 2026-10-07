@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.07d';
+  const VERSAO_APP = '2026.10.07f';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -5080,7 +5080,7 @@ async function linhasDoPdf(buffer){
     paginas.push(linhas.map(l=>{
       const its = l.itens.sort((a,b)=>a.x-b.x);
       return {t: its.map(i=>i.s).join(' ').replace(/\s+/g,' ').trim(),
-              itens: its.map(i=>({x:i.x, s:i.s}))};
+              y: l.y, itens: its.map(i=>({x:i.x, s:i.s}))};
     }).filter(l=>l.t));
   }
   return paginas;
@@ -5097,8 +5097,9 @@ function extrairCartoes(paginas, nomeArquivo){
   /* aceita tanto as linhas com posição quanto texto puro (relatório antigo
      ou leitura que não trouxe as coordenadas) */
   const linhas = [];
-  paginas.forEach(p=> p.forEach(l=>
-    linhas.push(typeof l === 'string' ? {t: l, itens: null} : l)));
+  paginas.forEach((p, pi)=> p.forEach(l=>
+    linhas.push(typeof l === 'string' ? {t: l, itens: null, pagina: pi}
+                                      : Object.assign({pagina: pi}, l))));
 
   /* Onde cada coluna começa, lido do cabeçalho do relatório. Com isso as
      batidas, os quatro totais e as observações são separados pela posição em
@@ -5118,6 +5119,31 @@ function extrairCartoes(paginas, nomeArquivo){
 
   const reDia = new RegExp('^(\\d{2}\\/\\d{2}\\/\\d{4})\\s+('+DIAS_SEM+')\\s+(.+)$');
   const reHora = /\d{1,2}:\d{2}/g;
+
+  /* O texto da coluna Observações quase sempre não cabe em uma linha só, e o
+     relatório quebra o resto em linhas próprias — umas acima, outras abaixo da
+     linha do dia. Elas chegam aqui como linhas soltas, com texto apenas na
+     faixa horizontal das observações. Cada pedaço solto volta para o dia
+     impresso mais perto dele, senão a hora a abonar escrita ali se perde.
+     Exemplo real: "Dispensa de : 01:30" vem antes do dia e "horas" depois. */
+  const obsSolta = {};
+  if(limiteObs){
+    const ehDia = linhas.map(l=> reDia.test(l.t));
+    linhas.forEach((l, i)=>{
+      const its = l.itens || [];
+      if(ehDia[i] || !its.length) return;
+      if(!its.every(it=> it.x >= limiteObs)) return;
+      let alvo = -1, perto = Infinity;
+      for(let j = i-2; j <= i+2; j++){
+        if(j < 0 || j >= linhas.length || j === i || !ehDia[j]) continue;
+        if(linhas[j].pagina !== l.pagina) continue;
+        const dist = (typeof l.y === 'number' && typeof linhas[j].y === 'number')
+                   ? Math.abs(l.y - linhas[j].y) : Math.abs(i - j);
+        if(dist < perto){ perto = dist; alvo = j; }
+      }
+      if(alvo >= 0) obsSolta[alvo] = (obsSolta[alvo] ? obsSolta[alvo]+' ' : '') + l.t.trim();
+    });
+  }
   const cartoes = [];
   const porChave = {};
   let atual = null;
@@ -5155,7 +5181,7 @@ function extrairCartoes(paginas, nomeArquivo){
     const resto = m[3];
     const itens = linhaObj.itens || [];
 
-    let marcas = [], totais = [], observacao = '';
+    let marcas = [], totais = [], observacao = obsSolta[i] || '';
     if(limiteBatida && itens.length){
       /* pela posição das colunas */
       itens.forEach(it=>{
@@ -5213,7 +5239,7 @@ const CALCULO_PADRAO = {nome:'PADRÃO', jornada:'07:20', jornadaSabado:'07:20',
   jornadaSabadoRua:'04:00', jornadaDomingo:'06:00', tolerancia:'10',
   tolEntrada:'5', tolSaida:'5', margemExtra:'NAO',
   noturnoIni:'22:00', noturnoFim:'05:00',
-  base:'FIXA', domingoExtra:'100', tipoLoja:''};
+  base:'CH', domingoExtra:'100', tipoLoja:''};
 
 /* Margem do dia em minutos: entrada + saída. Cálculos antigos, que só têm a
    tolerância única, continuam valendo com ela até alguém salvar os campos
@@ -5257,6 +5283,48 @@ function resumoCalculo(c){
          ' · margem '+tolPartes(c).entrada+'+'+tolPartes(c).saida+' min'+
          (c.margemExtra==='SIM'?' (atraso e extra)':' (só atraso)')+
          (c.base==='CH'?' · base CH':'');
+}
+
+/* O cartão imprime a carga horária contratada de cada dia — 08:00 num dia
+   útil, 04:00 num sábado de loja de rua. Quando o cálculo está com jornadas
+   fixas e essa carga não bate, os números saem errados sem ninguém perceber.
+   Esta conferência acha esses dias para avisar na tela. */
+function conferirCargaDoCartao(r){
+  const cfg = calculoPor(r.calculoId);
+  if(cfg.base === 'CH') return null;
+  const filial = filialDoResultado(r);
+  const ehRua = cfg.tipoLoja === 'RUA' ? true
+              : cfg.tipoLoja === 'SHOPPING' ? false
+              : tipoLojaDaFilial(filial) === 'RUA';
+  const fixa = horaParaMin(cfg.jornada);
+  const sab  = horaParaMin(ehRua ? (cfg.jornadaSabadoRua || '04:00')
+                                 : (cfg.jornadaSabado || cfg.jornada));
+  const dom  = horaParaMin(cfg.jornadaDomingo || cfg.jornada);
+
+  let diferentes = 0, exemplo = null;
+  (r.cartao.dias || []).forEach(d=>{
+    if(!(d.marcas||[]).length || !(d.ch > 0)) return;
+    const semana = String(d.semana||'').toLowerCase();
+    const usada = semana.indexOf('dom')===0 ? dom : /^s[aá]b/.test(semana) ? sab : fixa;
+    if(usada === d.ch) return;
+    diferentes++;
+    if(!exemplo) exemplo = {data:d.data, cartao:d.ch, calculo:usada};
+  });
+  return diferentes ? {dias:diferentes, exemplo, calculo:cfg} : null;
+}
+
+function divergenciasDaTela(){
+  const porCalculo = {};
+  S.he.resultados.forEach(r=>{
+    const d = conferirCargaDoCartao(r);
+    if(!d) return;
+    const id = r.calculoId;
+    if(!porCalculo[id]) porCalculo[id] = {nome:calculoPor(id).nome, calculoId:id,
+      cartoes:0, dias:0, exemplo:d.exemplo};
+    porCalculo[id].cartoes++;
+    porCalculo[id].dias += d.dias;
+  });
+  return Object.keys(porCalculo).map(k=>porCalculo[k]);
 }
 
 /* ---------- apuração ---------- */
@@ -5309,6 +5377,28 @@ function apurar(cartao, cfg, filial){
        ou pela carga horária zerada na própria linha. */
     const feriadoParado = RE_FERIADO.test(defDia) || (d.ch === 0 && !d.semTotais && !folga);
     if(trabalhado <= 0){
+      /* Declaração sem nenhuma batida: ela abona só as horas escritas em
+         Observações, não o dia inteiro. O que sobrar da jornada do dia continua
+         sendo descontado como horas. Dia abonado sem valor escrito (atestado,
+         por exemplo) segue cobrindo o dia todo. Aqui não há batida para a
+         margem de tolerância proteger, então o resto é descontado inteiro. */
+      const declarado = Math.max(0, +d.abonoMin || 0);
+      if(abonado && declarado > 0){
+        const sem = String(d.semana||'').toLowerCase();
+        const baseDia = sem.indexOf('dom') === 0
+              ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaDom)
+              : /^s[aá]b/.test(sem)
+              ? ((cfg.base === 'CH' && d.ch > 0) ? d.ch : jornadaSab)
+              : (cfg.base === 'CH' ? d.ch : jornadaFixa);
+        if(declarado < baseDia){
+          const resta = baseDia - declarado;
+          r.diasAbono++; r.abonadas += declarado;
+          r.atrasos += resta; r.diasAtraso++;
+          r.detalhe.push(Object.assign({}, d, {tipo:'ABONO PARCIAL',
+            trabalhado:0, extra:0, extraNot:0, atraso:resta, abonadas:declarado}));
+          return;
+        }
+      }
       const tipoDia = abonado ? 'ABONO' : folga ? 'FOLGA'
                     : feriadoParado ? 'FERIADO' : 'FALTA';
       if(tipoDia === 'ABONO') r.diasAbono++;
@@ -5742,6 +5832,15 @@ function tabelaHoras(){
     <div><b style="color:var(--vermelho)">${minParaHora(soma('atrasos'))}</b> atrasos</div>
   </div>
   ${alertas?`<div class="aviso erro">${alertas} marcação(ões) inconsistente(s). Clique no funcionário para ver o dia.</div>`:''}
+  ${divergenciasDaTela().map(d=>`
+    <div class="aviso erro" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <span>O cartão traz a carga horária de cada dia, e ela não bate com o cálculo
+        <b>${esc(d.nome)}</b> em ${d.dias} dia(s) de ${d.cartoes} cartão(ões).
+        Em <b>${esc(d.exemplo.data)}</b> o cartão diz <b>${minParaHora(d.exemplo.cartao)}</b>
+        e o cálculo está usando <b>${minParaHora(d.exemplo.calculo)}</b>.</span>
+      <button class="btn mini" data-usar-ch="${esc(d.calculoId)}" style="margin-left:auto">
+        Usar a carga do cartão</button>
+    </div>`).join('')}
   <div class="filial">
     <div class="filial-topo">
       <div><div class="filial-nome">Apuração de ${compBonita(S.competencia)}</div>
@@ -5811,6 +5910,20 @@ function ligarHorasExtras(){
       importarCartoes([...e.dataTransfer.files]); };
   }
   const b = id => document.getElementById(id);
+  document.querySelectorAll('[data-usar-ch]').forEach(x=> x.onclick = async ()=>{
+    const c = calculoPor(x.dataset.usarCh);
+    if(!confirm('Passar o cálculo "'+c.nome+'" a usar a carga horária impressa no cartão?'+
+        '\n\nÉ o que o próprio relógio usa para fechar o saldo de cada dia, e resolve '+
+        'jornada diferente por dia — 8h na semana e 4h no sábado, por exemplo.')) return;
+    carregando(true);
+    try{
+      await api('salvarCalculo', {calculo: Object.assign({}, c, {base:'CH'})});
+      await recarregar();
+      recalcular();
+      toast('O cálculo '+c.nome+' passou a seguir a carga do cartão.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
   if(b('heLimpar')) b('heLimpar').onclick = limparCartoes;
   if(b('heExcel')) b('heExcel').onclick = exportarHorasExcel;
   if(b('hePdf')) b('hePdf').onclick = exportarHorasPdf;
@@ -5943,17 +6056,21 @@ function detalheHoras(i){
       <div class="previa">
         <table><thead><tr>
           <th>Data</th><th>Dia</th><th>Definição</th><th>Marcações</th>
-          <th>Trabalhado</th><th>CH</th><th>Extra</th><th>Extra not.</th><th>Atraso</th>
+          <th>Trabalhado</th><th>CH</th><th>Abonado</th><th>Extra</th><th>Extra not.</th><th>Atraso</th>
         </tr></thead><tbody>
         ${r.ap.detalhe.map(d=>`<tr>
           <td class="mono">${esc(d.data)}</td><td>${esc(d.semana)}</td>
           <td>${d.tipo==='FALTA'?'<span class="tag erro">Falta</span>'
                 : d.tipo==='FOLGA'?'<span class="tag atual">Folga</span>'
+                : d.tipo==='ABONO PARCIAL'
+                  ?`<span class="tag dup">${esc(d.definicao||'Abono')} parcial</span>`
                 : d.tipo==='ABONO'?`<span class="tag novo">${esc(d.definicao||'Abono')}</span>`
                 : esc(d.definicao)}</td>
           <td class="mono" style="color:var(--apagado)">${d.marcas.map(minParaHora).join(' · ')||'—'}</td>
           <td class="mono">${minParaHora(d.trabalhado)}</td>
           <td class="mono" style="color:var(--apagado)">${minParaHora(d.ch)}</td>
+          <td class="mono" style="color:${d.abonadas?'var(--ambar)':'var(--apagado)'}"
+              ${d.observacao?`title="${esc(d.observacao)}"`:''}>${d.abonadas?minParaHora(d.abonadas):'—'}</td>
           <td class="mono" style="color:${d.extra?'var(--verde)':'inherit'}">${minParaHora(d.extra)}</td>
           <td class="mono">${minParaHora(d.extraNot||0)}</td>
           <td class="mono" style="color:${d.atraso?'var(--vermelho)':'inherit'}">${minParaHora(d.atraso)}</td>
@@ -6012,15 +6129,19 @@ async function exportarHorasExcel(){
     .concat(Array(11).fill({wch:15})).concat([{wch:40}]);
   XLSX.utils.book_append_sheet(wb, ws, 'RESUMO');
 
-  const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH','EXTRA','EXTRA NOTURNA','ATRASO']];
+  const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH',
+    'ABONADO','EXTRA','EXTRA NOTURNA','ATRASO','OBSERVAÇÕES']];
   S.he.resultados.forEach(r=> r.ap.detalhe.forEach(d=> det.push([
     r.nome, d.data, d.semana,
     d.tipo==='FALTA'?'FALTA':d.tipo==='FOLGA'?'FOLGA':d.definicao,
     d.marcas.map(minParaHora).join(' '), minParaHora(d.trabalhado), minParaHora(d.ch),
-    minParaHora(d.extra), minParaHora(d.extraNot||0), minParaHora(d.atraso)
+    d.abonadas?minParaHora(d.abonadas):'',
+    minParaHora(d.extra), minParaHora(d.extraNot||0), minParaHora(d.atraso),
+    d.observacao || ''
   ])));
   const ws2 = XLSX.utils.aoa_to_sheet(det);
-  ws2['!cols'] = [{wch:36},{wch:12},{wch:6},{wch:18},{wch:34}].concat(Array(5).fill({wch:14}));
+  ws2['!cols'] = [{wch:36},{wch:12},{wch:6},{wch:18},{wch:34}]
+    .concat(Array(6).fill({wch:14})).concat([{wch:30}]);
   XLSX.utils.book_append_sheet(wb, ws2, 'DIA A DIA');
   XLSX.writeFile(wb, 'HORAS EXTRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
