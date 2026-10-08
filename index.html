@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.07i';
+  const VERSAO_APP = '2026.10.08a';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -721,6 +721,142 @@ button.tag.dup:hover{background:var(--ambar);color:#fff;border-color:var(--ambar
 .envio .fechar-envio{margin-left:auto;color:var(--apagado);font-size:14px;line-height:1;
   padding:0 2px;flex:none}
 
+/* ==================================================================
+   INTERFACE DE CELULAR — gerentes de filial
+   O gerente anexa de pé, na loja, com uma mão. Tudo aqui é alvo grande,
+   uma coluna só, e o estado do envio aparece na própria linha do
+   documento: enviando, salvo ou erro com o botão de tentar de novo.
+   ================================================================== */
+body.celular{background:var(--papel)}
+body.celular.uma-aba #abas{display:none}
+body.celular #abas{
+  overflow-x:auto;gap:6px;padding:6px 10px;-webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+body.celular #abas::-webkit-scrollbar{display:none}
+body.celular .aba{white-space:nowrap;min-height:40px;font-size:13px}
+body.celular .topo{padding:8px 12px}
+body.celular #conteudo{padding:0}
+.cel{max-width:560px;margin:0 auto;padding:10px 12px 90px}
+.cel-capa{
+  background:var(--cartao);border:1px solid var(--linha);border-radius:3px;
+  padding:14px;box-shadow:var(--sombra);margin-bottom:12px;
+}
+.cel-capa-topo{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cel-filial{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.cel-mes{margin-left:auto;font-size:13px;color:var(--apagado)}
+.cel-mes b{color:var(--tinta)}
+.cel-barra{height:7px;background:var(--papel);border-radius:4px;margin:11px 0 7px;overflow:hidden}
+.cel-barra i{display:block;height:100%;background:var(--verde);transition:width .35s}
+.cel-conta{font-size:13px;color:var(--apagado)}
+.cel-conta b{color:var(--tinta);font-size:15px}
+.cel-busca{position:relative;margin-bottom:10px}
+.cel-busca input{
+  width:100%;height:46px;padding:0 14px;border:1px solid var(--linha);
+  border-radius:3px;background:var(--cartao);font-size:16px;
+}
+.cel-busca input:focus{outline:none;border-color:var(--tinta)}
+.cel-grupo{font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--apagado);font-weight:700;margin:16px 0 7px}
+.cel-pessoa{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  background:var(--cartao);border:1px solid var(--linha);border-radius:3px;
+  padding:12px 13px;margin-bottom:7px;min-height:62px;
+}
+.cel-pessoa:active{background:#f6f7f9}
+.cel-pessoa .barrinha{width:4px;align-self:stretch;border-radius:2px;flex:none;margin:-12px 0 -12px -13px}
+.cel-pessoa .barrinha.b-vermelho{background:var(--vermelho)}
+.cel-pessoa .barrinha.b-ambar{background:var(--ambar)}
+.cel-pessoa .barrinha.b-verde{background:var(--verde)}
+.cel-pessoa .barrinha.b-neutro{background:var(--linha)}
+.cel-nome{font-weight:600;font-size:15px;line-height:1.25;word-break:break-word}
+.cel-sub{font-size:12.5px;color:var(--apagado);margin-top:2px}
+.cel-sub.falta{color:var(--vermelho)}
+.cel-sub.ok{color:var(--verde)}
+.cel-conta-peq{margin-left:auto;font-size:13px;color:var(--apagado);flex:none}
+.cel-seta{flex:none;color:var(--linha-forte)}
+
+/* ---- ficha do funcionário em tela cheia ---- */
+.cel-ficha{
+  position:fixed;inset:0;z-index:70;background:var(--papel);
+  display:flex;flex-direction:column;animation:subir .18s ease-out;
+}
+@keyframes subir{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+.cel-ficha-topo{
+  background:var(--cartao);border-bottom:1px solid var(--linha);
+  padding:10px 12px;display:flex;align-items:center;gap:10px;flex:none;
+}
+.cel-voltar{
+  width:42px;height:42px;flex:none;display:grid;place-items:center;
+  border:1px solid var(--linha);border-radius:3px;font-size:19px;
+}
+.cel-voltar:active{background:var(--papel)}
+.cel-ficha-corpo{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 40px}
+.cel-ficha-corpo .cel{padding:0}
+.cel-doc{
+  background:var(--cartao);border:1px solid var(--linha);border-left:3px solid var(--linha);
+  border-radius:3px;padding:12px 13px;margin-bottom:9px;
+}
+.cel-doc.falta{border-left-color:var(--vermelho)}
+.cel-doc.enviado{border-left-color:var(--ambar)}
+.cel-doc.aprovado{border-left-color:var(--verde)}
+.cel-doc.indo{border-left-color:var(--ambar)}
+.cel-doc.erro{border-left-color:var(--vermelho);background:var(--vermelho-suave)}
+.cel-doc-topo{display:flex;align-items:center;gap:9px}
+.cel-doc-tipo{font-weight:700;font-size:14px;letter-spacing:.01em;flex:1;min-width:0}
+.cel-estado{font-size:12px;font-weight:600;white-space:nowrap}
+.cel-estado.falta{color:var(--vermelho)}
+.cel-estado.enviado{color:var(--ambar)}
+.cel-estado.aprovado{color:var(--verde)}
+.cel-estado.indo{color:var(--ambar);display:flex;align-items:center;gap:6px}
+.cel-estado.indo::before{
+  content:'';width:12px;height:12px;border:2px solid var(--ambar);
+  border-top-color:transparent;border-radius:50%;animation:girar .7s linear infinite;
+}
+.cel-estado.erro{color:var(--vermelho)}
+.cel-acoes{display:flex;gap:8px;margin-top:11px}
+.cel-bt{
+  flex:1;height:48px;border-radius:3px;font-size:14px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  border:1px solid var(--linha-forte);background:var(--cartao);
+}
+.cel-bt:active{background:var(--papel)}
+.cel-bt.forte{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.cel-bt.forte:active{background:var(--grafite)}
+.cel-bt.erro{background:var(--vermelho);color:#fff;border-color:var(--vermelho)}
+.cel-tira{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.cel-arq{
+  width:62px;height:62px;border:1px solid var(--linha);border-radius:3px;
+  overflow:hidden;position:relative;background:var(--papel);flex:none;
+  display:grid;place-items:center;
+}
+.cel-arq img{width:100%;height:100%;object-fit:cover}
+.cel-arq .marca{position:absolute;inset:auto 0 0 0;height:3px;background:var(--ambar)}
+.cel-arq.ok .marca{background:var(--verde)}
+.cel-arq-x{
+  position:absolute;top:0;right:0;width:22px;height:22px;background:rgba(16,18,21,.72);
+  color:#fff;font-size:12px;line-height:22px;text-align:center;
+}
+.cel-recado{font-size:12.5px;color:var(--apagado);margin-top:8px;word-break:break-word}
+.cel-recado.erro{color:var(--vermelho);font-weight:600}
+.cel-fechado{
+  background:var(--ambar-suave);border:1px solid var(--ambar);color:#7a5308;
+  border-radius:3px;padding:11px 13px;font-size:13px;margin-bottom:12px;
+}
+.cel-vazio{text-align:center;color:var(--apagado);padding:40px 16px;font-size:14px}
+/* No telefone os avisos de envio ocupam a largura toda, embaixo. Em troca
+   a ficha ganha folga no pé: assim nenhum botão fica escondido atrás deles,
+   e o topo com o botão Voltar continua livre. */
+body.celular #envios{
+  right:8px;left:8px;bottom:8px;width:auto;max-width:none;max-height:40vh;
+}
+body.celular .cel-ficha-corpo{padding-bottom:200px}
+/* dedo grande, tela pequena: nada de alvo abaixo de 44px */
+@media(max-width:520px){
+  .cel{padding:8px 10px 90px}
+  .cel-bt{font-size:13.5px}
+}
+
 .progresso-txt{
   position:absolute;left:50%;top:calc(50% + 28px);transform:translateX(-50%);
   background:var(--tinta);color:#fff;font-size:12.5px;font-weight:600;
@@ -1410,6 +1546,20 @@ function desenhar(){
   const rolagem = mesmaAba && rolavel ? rolavel.scrollTop : 0;
   const janela = mesmaAba ? window.scrollY : 0;
   _abaDesenhada = S.aba;
+
+  /* O gerente de filial trabalha pelo celular: a aba ANEXAR dele é a tela
+     de telefone, de uma coluna só. As outras abas, se tiver, seguem como
+     estão — já encolhem sozinhas no telefone. */
+  document.body.classList.toggle('celular', interfaceCelular());
+  document.body.classList.toggle('uma-aba',
+    interfaceCelular() && S.sessao.abas.filter(a=>a!=='ADMIN').length <= 1);
+  if(interfaceCelular() && S.aba==='ANEXAR'){
+    c.innerHTML = telaCelular();
+    ligarEventos();
+    ligarCelular();
+    _abaDesenhada = S.aba;
+    return;
+  }
 
   const aviso = avisoOpcionais();
   if(S.aba==='ANEXAR') c.innerHTML = aviso + telaAnexar();
@@ -4509,6 +4659,345 @@ async function exportarContPdf(){
    Tela dos gerentes de filial: só os funcionários da própria loja,
    com o que falta anexar no mês em destaque.
    ================================================================== */
+/* ==================================================================
+   INTERFACE DE CELULAR
+   O gerente de filial anexa pelo telefone, em pé, dentro da loja. Por
+   isso ele não recebe a tela de escritório: recebe uma lista de uma
+   coluna só, alvos grandes, e uma ficha em tela cheia por funcionário
+   onde cada documento tem o seu próprio botão de câmera e de arquivo.
+   GERENTE RH e MASTER continuam na tela completa, que é onde conferem,
+   aprovam e exportam.
+   ================================================================== */
+function interfaceCelular(){
+  return S.sessao && S.sessao.papel === 'GERENTE';
+}
+
+/* Estado dos envios em andamento, por funcionário e tipo de documento.
+   Mora fora do HTML para sobreviver ao redesenho da linha. */
+const _envioCel = {};
+function chaveEnvio(funcId, tipo){ return funcId + '|' + tipo; }
+
+function pessoasDoCelular(){
+  const busca = (S.busca||'').trim().toUpperCase();
+  return S.funcionarios
+    .filter(f=>f.status!=='DEMITIDO')
+    .filter(f=>!busca || f.nome.toUpperCase().includes(busca))
+    .sort((a,b)=>{
+      /* quem está faltando documento vem primeiro: é o que o gerente
+         precisa resolver, e evita rolar a lista inteira atrás deles */
+      const pa = situacao(a)==='vermelho' ? 0 : situacao(a)==='ambar' ? 1 : 2;
+      const pb = situacao(b)==='vermelho' ? 0 : situacao(b)==='ambar' ? 1 : 2;
+      return pa - pb || a.nome.localeCompare(b.nome,'pt-BR');
+    });
+}
+
+function telaCelular(){
+  const lista = pessoasDoCelular();
+  const todos = S.funcionarios.filter(f=>f.status!=='DEMITIDO');
+  const prontos = todos.filter(f=>situacao(f)!=='vermelho').length;
+  const pct = todos.length ? Math.round(prontos/todos.length*100) : 0;
+  const aberto = podeAnexarNaCompetencia();
+
+  let html = `<div class="cel">
+    <div class="cel-capa">
+      <div class="cel-capa-topo">
+        <span class="cel-filial">${esc(S.sessao.filial || 'Minha filial')}</span>
+        <span class="cel-mes">Mês <b>${compBonita(S.competencia)}</b></span>
+      </div>
+      <div class="cel-barra"><i style="width:${pct}%"></i></div>
+      <div class="cel-conta"><b>${prontos}</b> de <b>${todos.length}</b> com tudo anexado${
+        todos.length-prontos ? ` · <span style="color:var(--vermelho);font-weight:600">${
+          todos.length-prontos} ${todos.length-prontos===1?'falta':'faltam'}</span>` : ''}</div>
+    </div>`;
+
+  if(!aberto){
+    html += `<div class="cel-fechado"><b>${compBonita(S.competencia)}</b> está fechado para
+      anexar. Você anexa no mês atual, <b>${compBonita(hojeCompetencia())}</b>.
+      Para corrigir um mês fechado, fale com o RH.</div>`;
+  }
+
+  html += `<div class="cel-busca">
+    <input id="celBusca" placeholder="Buscar pelo nome" value="${esc(S.busca)}"
+           autocomplete="off" enterkeyhint="search"></div>`;
+
+  if(!lista.length){
+    html += `<div class="cel-vazio">${S.busca.trim()
+      ? 'Ninguém com esse nome.'
+      : 'Nenhum funcionário na sua filial. Fale com o RH.'}</div></div>`;
+    return html;
+  }
+
+  html += lista.map(f=>{
+    const cor = situacao(f);
+    const tipos = tiposDe(f);
+    const meus = docsDe(f.id, S.competencia);
+    const faltam = tipos.filter(t=>!meus.some(d=>d.tipo===t));
+    const sub = faltam.length
+      ? `<div class="cel-sub falta">Falta ${esc(faltam.slice(0,3).join(', '))}${
+          faltam.length>3?' +'+(faltam.length-3):''}</div>`
+      : `<div class="cel-sub ok">Tudo anexado</div>`;
+    return `<button class="cel-pessoa" data-cel-func="${esc(f.id)}">
+      <span class="barrinha b-${cor}"></span>
+      <span style="flex:1;min-width:0">
+        <span class="cel-nome">${esc(f.nome)}</span>${sub}</span>
+      <span class="cel-conta-peq mono">${tipos.length-faltam.length}/${tipos.length}</span>
+      <svg class="cel-seta" width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+    </button>`;
+  }).join('');
+
+  return html + '</div>';
+}
+
+function ligarCelular(){
+  const b = document.getElementById('celBusca');
+  if(b) b.oninput = e=>{
+    S.busca = e.target.value;
+    const pos = e.target.selectionStart;
+    clearTimeout(buscaTimer);
+    buscaTimer = setTimeout(()=>{
+      desenhar();
+      const novo = document.getElementById('celBusca');
+      if(novo){ novo.focus(); novo.setSelectionRange(pos, pos); }
+    }, 220);
+  };
+  document.querySelectorAll('[data-cel-func]').forEach(x=>
+    x.onclick = ()=>abrirFichaCelular(x.dataset.celFunc));
+}
+
+/* ---------- ficha de um funcionário ---------- */
+function abrirFichaCelular(funcId){
+  const f = S.funcionarios.find(x=>x.id===funcId);
+  if(!f) return;
+  const el = document.createElement('div');
+  el.className = 'cel-ficha';
+  el.id = 'celFicha';
+  el.innerHTML = `
+    <div class="cel-ficha-topo">
+      <button class="cel-voltar" id="celVoltar" aria-label="Voltar">‹</button>
+      <div style="flex:1;min-width:0">
+        <div class="cel-nome" style="font-size:15px">${esc(f.nome)}</div>
+        <div class="cel-sub">${esc(f.filial||'')} · ${compBonita(S.competencia)}</div>
+      </div>
+    </div>
+    <div class="cel-ficha-corpo" id="celCorpo"></div>`;
+  document.body.appendChild(el);
+  el._func = f;
+  /* O botão Voltar do telefone tem de fechar a ficha, não sair do sistema.
+     Uma entrada no histórico resolve: voltar desfaz essa entrada. */
+  history.pushState({ficha:1}, '');
+  const fechar = ()=>{
+    if(!document.body.contains(el)) return;
+    el.remove();
+    desenhar();
+  };
+  el._fechar = fechar;
+  el.querySelector('#celVoltar').onclick = ()=>{ history.back(); };
+  desenharFichaCelular(el);
+}
+
+window.addEventListener('popstate', ()=>{
+  const el = document.getElementById('celFicha');
+  if(el && el._fechar) el._fechar();
+});
+
+function desenharFichaCelular(el){
+  const f = el._func;
+  const meus = docsDe(f.id, S.competencia);
+  const tipos = tiposDe(f);
+  const opcionais = (S.config.tiposOpcionais||[]).filter(t=>!tipos.includes(t));
+  const extras = [...new Set(meus.filter(d=>!tipos.includes(d.tipo) && !opcionais.includes(d.tipo))
+                                 .map(d=>d.tipo))];
+  const aberto = podeAnexarNaCompetencia();
+
+  let html = '<div class="cel">';
+  if(!aberto){
+    html += `<div class="cel-fechado">Mês fechado para anexar. Você anexa em
+      <b>${compBonita(hojeCompetencia())}</b>.</div>`;
+  }
+  html += '<div class="cel-grupo">Documentos do mês</div>';
+  tipos.forEach(t=> html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t), aberto));
+
+  if(opcionais.length || extras.length){
+    html += '<div class="cel-grupo">Outros documentos</div>';
+    opcionais.concat(extras).forEach(t=>
+      html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t), aberto, true));
+  }
+  if(aberto){
+    html += `<button class="cel-bt" id="celOutro" style="width:100%;margin-top:4px">
+      + Outro documento</button>`;
+  }
+  el.querySelector('#celCorpo').innerHTML = html + '</div>';
+  ligarFichaCelular(el);
+}
+
+function linhaDocCelular(f, tipo, docs, aberto, opcional){
+  const env = _envioCel[chaveEnvio(f.id, tipo)];
+  const temArquivo = docs.length > 0;
+  const aprovado = temArquivo && docs.every(d=>d.status==='APROVADO');
+  const estado = env ? env.estado
+    : aprovado ? 'aprovado' : temArquivo ? 'enviado' : opcional ? '' : 'falta';
+  const rotulo = {
+    indo: 'Enviando…', erro: 'Não enviou', aprovado: 'Conferido',
+    enviado: 'Na nuvem', falta: 'Falta'
+  }[estado] || 'Opcional';
+
+  const tira = docs.length ? `<div class="cel-tira">${docs.map(d=>`
+    <span class="cel-arq ${d.status==='APROVADO'?'ok':''}" data-cel-ver="${esc(d.id)}">
+      <span id="mini-${esc(d.id)}" style="width:100%;height:100%;display:grid;place-items:center">
+        ${miolo(d)}</span>
+      <span class="marca"></span>
+      ${aberto && d.status!=='APROVADO'
+        ? `<button class="cel-arq-x" data-cel-excluir="${esc(d.id)}" aria-label="Excluir">✕</button>`
+        : ''}
+    </span>`).join('')}</div>` : '';
+
+  let acoes = '';
+  if(aberto && estado !== 'indo'){
+    acoes = `<div class="cel-acoes">
+      <button class="cel-bt ${estado==='erro'?'erro':(temArquivo?'':'forte')}"
+              data-cel-camera="${esc(tipo)}">
+        ${estado==='erro' ? 'Tentar de novo' : `
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2"><path d="M3 8h3l2-2h8l2 2h3v11H3z"/><circle cx="12" cy="13" r="3.4"/></svg>
+        Câmera`}</button>
+      <button class="cel-bt" data-cel-arquivo="${esc(tipo)}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2"><path d="M4 5h6l2 2h8v12H4z"/></svg>
+        Arquivo</button>
+    </div>`;
+  }
+
+  return `<div class="cel-doc ${estado}" data-cel-linha="${esc(tipo)}">
+    <div class="cel-doc-topo">
+      <span class="cel-doc-tipo">${esc(tipo)}</span>
+      <span class="cel-estado ${estado}">${rotulo}${
+        docs.length>1?' · '+docs.length:''}</span>
+    </div>
+    ${tira}
+    ${env && env.recado ? `<div class="cel-recado ${env.estado==='erro'?'erro':''}">${esc(env.recado)}</div>` : ''}
+    ${acoes}
+  </div>`;
+}
+
+function ligarFichaCelular(el){
+  const f = el._func;
+  el.querySelectorAll('[data-cel-camera]').forEach(b=>
+    b.onclick = ()=>escolherNoCelular(el, b.dataset.celCamera, true));
+  el.querySelectorAll('[data-cel-arquivo]').forEach(b=>
+    b.onclick = ()=>escolherNoCelular(el, b.dataset.celArquivo, false));
+  el.querySelectorAll('[data-cel-excluir]').forEach(b=> b.onclick = ev=>{
+    ev.stopPropagation();
+    excluirNoCelular(el, b.dataset.celExcluir);
+  });
+  el.querySelectorAll('[data-cel-ver]').forEach(b=> b.onclick = ev=>{
+    if(ev.target.closest('[data-cel-excluir]')) return;
+    S.docsFunc = f;
+    S.docsLista = docsDe(f.id, S.competencia);
+    verDocumento(b.dataset.celVer);
+  });
+  const outro = el.querySelector('#celOutro');
+  if(outro) outro.onclick = ()=>{
+    const t = prompt('Nome do documento (ex.: ATESTADO, ADVERTÊNCIA):');
+    if(t && t.trim()) escolherNoCelular(el, t.trim().toUpperCase(), false);
+  };
+  /* documento anexado antes de a miniatura existir: busca a imagem na hora */
+  docsDe(f.id, S.competencia)
+    .filter(d=>!d.miniatura && d.mimeType!=='application/pdf')
+    .forEach(async d=>{
+      const alvo = el.querySelector('#mini-'+d.id);
+      if(!alvo) return;
+      try{
+        const url = await urlArquivo(d.id);
+        alvo.innerHTML = `<img src="${url}" alt="${esc(d.tipo)}">`;
+      }catch(e){ alvo.innerHTML = '<span class="pdf-marca">—</span>'; }
+    });
+}
+
+/* Abre a câmera do telefone (capture) ou o seletor de arquivos, e já
+   começa a subir o que for escolhido — sem passo intermediário. */
+function escolherNoCelular(el, tipo, camera){
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = camera ? 'image/*' : 'image/*,application/pdf';
+  /* atributo, não propriedade: é o atributo que faz o telefone abrir a
+     câmera traseira direto, sem passar pelo seletor de arquivos */
+  if(camera) inp.setAttribute('capture', 'environment');
+  inp.multiple = !camera;
+  inp.onchange = ()=>{
+    const arqs = [...inp.files];
+    if(arqs.length) enviarNoCelular(el, tipo, arqs);
+  };
+  inp.click();
+}
+
+async function enviarNoCelular(el, tipo, arquivos){
+  const f = el._func;
+  const chave = chaveEnvio(f.id, tipo);
+  const total = arquivos.length;
+  let feitos = 0;
+  const pintar = ()=>{
+    if(document.body.contains(el)) desenharFichaCelular(el);
+  };
+  _envioCel[chave] = {estado:'indo',
+    recado: total>1 ? 'Enviando 0 de '+total+'…' : 'Preparando a foto…'};
+  pintar();
+
+  const falhas = [];
+  const {erros} = await emParalelo(arquivos, ENVIOS_SIMULTANEOS, async (arq)=>{
+    /* o aviso no canto da tela continua valendo: é o histórico do envio */
+    const aviso = envioAbrir(tipo + ' · ' + f.nome, 'Preparando ' + arq.name + '…');
+    try{
+      const pronto = await prepararArquivo(arq);
+      envioEstado(aviso, 'indo', 'Enviando para a nuvem…');
+      _envioCel[chave].recado = total>1
+        ? 'Enviando ' + feitos + ' de ' + total + '…' : 'Enviando para a nuvem…';
+      pintar();
+      const doc = await api('enviarDocumento', {
+        funcionarioId: f.id, tipo, competencia: S.competencia,
+        mimeType: pronto.mime, dados: pronto.base64, miniatura: pronto.miniatura
+      }, {silencioso:true});
+      doc.miniatura = pronto.miniatura;
+      S.documentos.push(doc);
+      feitos++;
+      _envioCel[chave].recado = total>1 ? 'Enviando ' + feitos + ' de ' + total + '…' : '';
+      envioEstado(aviso, 'ok', 'Salvo na nuvem · ' + compBonita(S.competencia));
+      pintar();
+    }catch(e){
+      falhas.push(e.message);
+      envioEstado(aviso, 'falhou', 'Não foi enviado — ' + e.message);
+      throw e;
+    }
+  });
+
+  if(erros.length){
+    _envioCel[chave] = {estado:'erro',
+      recado: (falhas[0] || 'Não deu para enviar') +
+        (erros.length>1 ? ' (' + erros.length + ' arquivos)' : '') +
+        ' — toque em Tentar de novo.'};
+  }else{
+    delete _envioCel[chave];
+    toast(total>1 ? total+' arquivos anexados em '+tipo+'.'
+                  : tipo+' anexado para '+f.nome.split(' ')[0]+'.');
+  }
+  pintar();
+  desenhar();
+}
+
+async function excluirNoCelular(el, id){
+  if(!confirm('Excluir este arquivo?')) return;
+  carregando(true);
+  try{
+    await api('excluirDocumento', {id});
+    delete S.cacheArquivo[id];
+    S.documentos = S.documentos.filter(x=>x.id!==id);
+    desenharFichaCelular(el);
+    desenhar();
+    toast('Arquivo excluído.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
 function telaAnexar(){
   const ativos = S.funcionarios
     .filter(f=>f.status!=='DEMITIDO')
