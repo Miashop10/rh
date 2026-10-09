@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.08a';
+  const VERSAO_APP = '2026.10.09b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -329,6 +329,29 @@ textarea.entrada{min-height:70px;resize:vertical}
 #visor .visor-area{flex:1;display:grid;place-items:center;padding:0 18px 18px;overflow:auto}
 #visor img{max-width:100%;max-height:100%;object-fit:contain;background:#fff}
 #visor iframe{width:100%;height:100%;border:none;background:#fff}
+#visor .visor-palco{width:100%;height:100%;display:grid;place-items:center}
+/* contador e setas: percorrer a pasta do funcionário sem fechar o visor */
+#visor .visor-cont{
+  color:#cdd4db;font-size:12px;font-family:'JetBrains Mono',monospace;
+  background:rgba(255,255,255,.1);padding:4px 9px;border-radius:2px;white-space:nowrap;
+}
+#visor .visor-nav{
+  position:absolute;top:50%;transform:translateY(-50%);z-index:2;
+  width:46px;height:78px;display:grid;place-items:center;
+  background:rgba(255,255,255,.13);color:#fff;font-size:30px;line-height:1;
+  border-radius:3px;transition:background .15s;
+}
+#visor .visor-nav:hover{background:rgba(255,255,255,.26)}
+#visor .visor-nav[disabled]{opacity:.2;cursor:default}
+#visor .visor-nav[disabled]:hover{background:rgba(255,255,255,.13)}
+#visor .visor-nav.ant{left:10px}
+#visor .visor-nav.prox{right:10px}
+#visor .visor-carregando{color:#9aa3ad;font-size:13px}
+@media(max-width:620px){
+  #visor .visor-nav{width:38px;height:62px;font-size:25px}
+  #visor .visor-topo{padding:10px 12px;gap:8px;flex-wrap:wrap}
+  #visor .visor-area{padding:0 8px 10px}
+}
 
 /* ---------- ADMIN ---------- */
 .sub-abas{display:flex;gap:2px;border-bottom:1px solid var(--linha);margin-bottom:18px}
@@ -2792,33 +2815,105 @@ function b64Bytes(b64){
   return arr;
 }
 
+/* A ordem de navegação é a que está na tela: quem abriu o terceiro cartão
+   espera que a seta leve ao quarto, não a uma ordem interna qualquer. Pega os
+   alvos clicáveis na ordem em que foram desenhados, sem repetir — o mesmo
+   arquivo aparece como miniatura grande e de novo na tira de anexos. */
+function ordemDaTela(){
+  const vistos = new Set(), ids = [];
+  document.querySelectorAll('[data-ver],[data-cel-ver]').forEach(e=>{
+    const id = e.dataset.ver || e.dataset.celVer;
+    if(id && !vistos.has(id)){ vistos.add(id); ids.push(id); }
+  });
+  return ids;
+}
+
 async function verDocumento(id){
-  const d = S.docsLista.find(x=>x.id===id);
-  carregando(true);
-  let url;
-  try{ url = await urlArquivo(id); }
-  catch(e){ carregando(false); return toast(e.message,true); }
-  carregando(false);
+  /* só navega entre documentos que estão carregados nesta lista */
+  const dentro = x => S.docsLista.some(d=>d.id===x);
+  let fila = ordemDaTela().filter(dentro);
+  if(fila.indexOf(id) < 0) fila = S.docsLista.map(d=>d.id);
+  if(fila.indexOf(id) < 0) fila = [id];
+  let i = fila.indexOf(id);
+
   const v = document.createElement('div');
   v.id='visor';
   v.innerHTML = `
     <div class="visor-topo">
-      <div><b>${esc(d.tipo)} · ${compBonita(d.competencia)}</b><br><small>${esc(S.docsFunc.nome)} · ${esc(d.arquivoNome)}</small></div>
+      <div id="vTitulo" style="min-width:0"></div>
+      <span class="visor-cont" id="vConta"></span>
       <div style="margin-left:auto;display:flex;gap:8px">
         ${podeAprovar()?'<button class="btn sec" id="vPdf">Exportar PDF</button>':''}
         <button class="btn sec" id="vFechar">Fechar</button>
       </div>
     </div>
-    <div class="visor-area">
-      ${d.mimeType==='application/pdf' ? `<iframe src="${url}"></iframe>` : `<img src="${url}" alt="${esc(d.tipo)}">`}
-    </div>`;
+    <button class="visor-nav ant" id="vAnt" title="Documento anterior (←)"
+            aria-label="Documento anterior">‹</button>
+    <button class="visor-nav prox" id="vProx" title="Próximo documento (→)"
+            aria-label="Próximo documento">›</button>
+    <div class="visor-area"><div class="visor-palco" id="vPalco"></div></div>`;
   document.body.appendChild(v);
-  v.querySelector('#vFechar').onclick = ()=>v.remove();
-  const bvp = v.querySelector('#vPdf');
-  if(bvp) bvp.onclick = ()=>exportarPdf([d], S.docsFunc);
-  document.addEventListener('keydown', function f(e){
-    if(e.key==='Escape'){ v.remove(); document.removeEventListener('keydown', f); }
-  });
+
+  const palco = v.querySelector('#vPalco');
+  const bAnt = v.querySelector('#vAnt'), bProx = v.querySelector('#vProx');
+  let pedido = 0;
+
+  const mostrar = async (n)=>{
+    if(n < 0 || n >= fila.length) return;
+    i = n;
+    const d = S.docsLista.find(x=>x.id===fila[i]);
+    if(!d) return;
+    v.querySelector('#vTitulo').innerHTML =
+      `<b>${esc(d.tipo)} · ${compBonita(d.competencia)}</b><br>` +
+      `<small>${esc(S.docsFunc.nome)} · ${esc(d.arquivoNome)}</small>`;
+    v.querySelector('#vConta').textContent = (i+1) + ' / ' + fila.length;
+    bAnt.disabled = i === 0;
+    bProx.disabled = i === fila.length-1;
+    v.querySelector('#vAnt').style.display = fila.length>1 ? '' : 'none';
+    v.querySelector('#vProx').style.display = fila.length>1 ? '' : 'none';
+    const bp = v.querySelector('#vPdf');
+    if(bp) bp.onclick = ()=>exportarPdf([d], S.docsFunc);
+
+    const meu = ++pedido;
+    palco.innerHTML = '<span class="visor-carregando">Abrindo…</span>';
+    let url;
+    try{ url = await urlArquivo(d.id); }
+    catch(e){
+      if(meu === pedido) palco.innerHTML = '<span class="visor-carregando">'+esc(e.message)+'</span>';
+      return;
+    }
+    /* chegou atrasado: a pessoa já passou para outro documento */
+    if(meu !== pedido || !document.body.contains(v)) return;
+    palco.innerHTML = d.mimeType==='application/pdf'
+      ? `<iframe src="${url}"></iframe>`
+      : `<img src="${url}" alt="${esc(d.tipo)}">`;
+    /* adianta o seguinte: a seta responde na hora quando for usada */
+    const seg = S.docsLista.find(x=>x.id===fila[i+1]);
+    if(seg) urlArquivo(seg.id).catch(()=>{});
+  };
+
+  const fechar = ()=>{ v.remove(); document.removeEventListener('keydown', tecla); };
+  function tecla(e){
+    if(e.key==='Escape') fechar();
+    else if(e.key==='ArrowRight') mostrar(i+1);
+    else if(e.key==='ArrowLeft') mostrar(i-1);
+  }
+  v.querySelector('#vFechar').onclick = fechar;
+  bAnt.onclick = ()=>mostrar(i-1);
+  bProx.onclick = ()=>mostrar(i+1);
+  document.addEventListener('keydown', tecla);
+
+  /* arrastar para o lado no telefone também troca de documento */
+  let x0 = null;
+  v.addEventListener('touchstart', e=>{ x0 = e.touches[0].clientX; }, {passive:true});
+  v.addEventListener('touchend', e=>{
+    if(x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    x0 = null;
+    if(Math.abs(dx) > 60) mostrar(dx < 0 ? i+1 : i-1);
+  }, {passive:true});
+
+  await mostrar(i);
 }
 
 /* ---------- EXPORTAÇÃO EM PDF ---------- */
@@ -4209,6 +4304,20 @@ async function salvarFolha(silencioso){
   finally{ carregando(false); }
 }
 
+/* O relatório que sai da folha não leva as contas intermediárias nem o que
+   só serve para a tela: o grupo, o valor diário de VT e de VR, a quantidade
+   de dias e a marcação de quem quer vale. O que interessa fora do sistema é
+   o total de cada um. A coluna VALE dos lançamentos também sai — o valor que
+   vale é o VALE MENSAL. A tela continua com tudo, porque lá se edita. */
+const FORA_DO_RELATORIO = ['GRUPO','VT/DIA','DIAS','VR/DIA','QUER VALE','VALE'];
+
+function semColunas(t, fora){
+  const corta = new Set(fora);
+  const manter = t.cab.map((c,i)=> corta.has(c) ? -1 : i).filter(i=>i>=0);
+  const pegar = l => manter.map(i=> l[i]===undefined ? '' : l[i]);
+  return {cab: pegar(t.cab), linhas: (t.linhas||[]).map(pegar), total: pegar(t.total||[])};
+}
+
 function tabelaFolha(){
   const lista = funcionariosDaFolha();
   const cab = ['FUNCIONÁRIO','FILIAL','GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR','VALE MENSAL','QUER VALE','OBSERVAÇÕES'];
@@ -4259,11 +4368,11 @@ function tabelaFolhaUnida(){
 
 async function exportarFolhaExcel(){
   await usar('xlsx');
-  const {cab, linhas, total} = tabelaFolhaUnida();
+  const {cab, linhas, total} = semColunas(tabelaFolhaUnida(), FORA_DO_RELATORIO);
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:12},{wch:8},{wch:14},{wch:12},{wch:14},
-                 {wch:14},{wch:11}]
-    .concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]);
+  ws['!cols'] = cab.map(c=> c==='FUNCIONÁRIO' ? {wch:36}
+                          : c==='OBSERVAÇÕES' ? {wch:34}
+                          : c==='FILIAL' ? {wch:18} : {wch:16});
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
@@ -4279,12 +4388,18 @@ async function exportarFolhaPdf(){
     const fonte = await doc.embedFont(StandardFonts.Helvetica);
     const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
     const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
-    const {cab, linhas, total} = tabelaFolha();
+    const {cab, linhas, total} = semColunas(tabelaFolha(), FORA_DO_RELATORIO);
     const L=841.89, A=595.28, m=30;
-    const larg = [176, 88, 96, 54, 34, 62, 54, 62, 62];
+    /* com menos colunas sobra largura: o nome respira e as observações, que
+       antes nem cabiam na folha, passam a sair impressas */
+    const LARGURAS = {'FUNCIONÁRIO':210, 'FILIAL':120, 'OBSERVAÇÕES':215};
+    const larg = cab.map(c=> LARGURAS[c] || 78);
     const xs = []; let acc = m;
     larg.forEach(w=>{ xs.push(acc); acc += w; });
+    /* o que cabe na coluna, na fonte usada */
     const corta = (t,max)=>{ t=String(t||''); return t.length>max?t.slice(0,max-1)+'…':t; };
+    const cabe = i => Math.max(4, Math.floor(larg[i]/4.3));
+    const destaque = cab.map(c=>/^TOTAL |^VALE MENSAL$/.test(c));
 
     let pg, y;
     const cabecalho = ()=>{
@@ -4293,8 +4408,9 @@ async function exportarFolhaPdf(){
       pg.drawText('Folha de pagamento · '+compBonita(S.competencia),
         {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
       y -= 44;
-      cab.slice(0,larg.length).forEach((t,i)=>
-        pg.drawText(corta(t,14),{x:xs[i], y, size:6.5, font:fonteB, color:rgb(.42,.45,.5)}));
+      cab.forEach((t,i)=>
+        pg.drawText(corta(t, Math.floor(larg[i]/3.3)),
+          {x:xs[i], y, size:6.5, font:fonteB, color:rgb(.42,.45,.5)}));
       y -= 6;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.7, color:rgb(.8,.83,.86)});
       y -= 12;
@@ -4302,17 +4418,17 @@ async function exportarFolhaPdf(){
     cabecalho();
     linhas.forEach(l=>{
       if(y < m+26) cabecalho();
-      l.slice(0,larg.length).forEach((t,i)=>
-        pg.drawText(corta(t, i===0?32:i===2?17:11),{x:xs[i], y, size:7.5,
-          font: (i===5||i===7)?fonteB:fonte, color:rgb(.06,.07,.08)}));
+      l.forEach((t,i)=>
+        pg.drawText(corta(t, cabe(i)),{x:xs[i], y, size:7.5,
+          font: destaque[i]?fonteB:fonte, color:rgb(.06,.07,.08)}));
       y -= 7;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
       y -= 11;
     });
     if(y < m+26) cabecalho();
     y -= 3;
-    total.slice(0,larg.length).forEach((t,i)=>{
-      if(t) pg.drawText(corta(t,12),{x:xs[i], y, size:8, font:fonteB});
+    total.forEach((t,i)=>{
+      if(t) pg.drawText(corta(t, cabe(i)),{x:xs[i], y, size:8, font:fonteB});
     });
     baixar(new Blob([await doc.save()],{type:'application/pdf'}),
       'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.pdf');
