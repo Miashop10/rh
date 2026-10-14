@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.09b';
+  const VERSAO_APP = '2026.10.14a';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -352,6 +352,56 @@ textarea.entrada{min-height:70px;resize:vertical}
   #visor .visor-topo{padding:10px 12px;gap:8px;flex-wrap:wrap}
   #visor .visor-area{padding:0 8px 10px}
 }
+
+/* ==================================================================
+   AVISO PRÉVIO
+   Uma linha por pessoa em aviso. A cor da linha é a situação da
+   rescisão — é o que o RH precisa enxergar de longe, sem abrir nada.
+   ================================================================== */
+.tab-aviso{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;
+  min-width:1180px}
+.tab-aviso th{
+  position:sticky;top:0;z-index:3;background:var(--cartao);
+  text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--apagado);font-weight:700;padding:9px 8px;white-space:nowrap;
+  border-bottom:1px solid var(--linha-forte);
+}
+.tab-aviso td{padding:5px 8px;border-bottom:1px solid #eef0f3;vertical-align:middle}
+.tab-aviso tr:last-child td{border-bottom:none}
+.tab-aviso .av-nome{font-weight:600;white-space:nowrap}
+.tab-aviso .entrada{padding:5px 7px;font-size:12.5px;width:100%;min-width:0}
+.tab-aviso select.entrada{padding-right:20px}
+.tab-aviso .col-sit select{min-width:128px}
+.tab-aviso .col-obs select{min-width:176px}
+.tab-aviso input[type=date].entrada{min-width:134px}
+.tab-aviso .col-sit{width:146px}
+.tab-aviso .col-obs{width:194px}
+.tab-aviso .col-dem{width:96px}
+.tab-aviso .av-cpf,.tab-aviso .av-filial{white-space:nowrap}
+/* a cor da situação pinta a linha inteira */
+tr.av-NAO_ENVIADO td{background:var(--vermelho-suave)}
+tr.av-ENVIADO     td{background:var(--ambar-suave)}
+tr.av-RECEBIDO    td{background:var(--laranja-suave)}
+tr.av-QUITADO     td{background:var(--verde-suave)}
+tr.av-NAO_ENVIADO .av-nome{color:var(--vermelho)}
+tr.av-ENVIADO     .av-nome{color:#8a5f0b}
+tr.av-RECEBIDO    .av-nome{color:var(--laranja)}
+tr.av-QUITADO     .av-nome{color:var(--verde)}
+.tab-aviso tr td:first-child{border-left:3px solid transparent}
+tr.av-NAO_ENVIADO td:first-child{border-left-color:var(--vermelho)}
+tr.av-ENVIADO     td:first-child{border-left-color:var(--ambar)}
+tr.av-RECEBIDO    td:first-child{border-left-color:var(--laranja)}
+tr.av-QUITADO     td:first-child{border-left-color:var(--verde)}
+/* campo que o sistema preencheu e ninguém corrigiu ainda */
+.tab-aviso .calculado{color:var(--apagado);font-style:italic}
+.tab-aviso .calculado:focus{color:var(--tinta);font-style:normal}
+.av-legenda{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  font-size:12px;color:var(--apagado);margin-bottom:12px}
+.av-legenda span{display:inline-flex;align-items:center;gap:6px}
+.av-legenda i{width:11px;height:11px;border-radius:2px;display:inline-block}
+.av-dem-sim{color:var(--vermelho);font-weight:700}
+.av-dem-nao{color:var(--apagado)}
+@media(max-width:820px){ .tab-aviso{min-width:980px} }
 
 /* ---------- ADMIN ---------- */
 .sub-abas{display:flex;gap:2px;border-bottom:1px solid var(--linha);margin-bottom:18px}
@@ -1015,7 +1065,8 @@ const S = {
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
-  qb:{ competencia:null, itens:[] }
+  qb:{ competencia:null, itens:[] },
+  avisos:[]
 };
 
 const ROTULO_ABA = {
@@ -1026,7 +1077,8 @@ const ROTULO_ABA = {
   HORAS_EXTRAS:'Horas extras',
   COMISSOES:'Comissões',
   QUEBRAS:'Quebras',
-  FOLHA:'Folha de pagamento'
+  FOLHA:'Folha de pagamento',
+  AVISO_PREVIO:'Aviso prévio'
 };
 
 /* ==================================================================
@@ -1296,6 +1348,7 @@ function aplicarCarga(d){
   S.prazos = d.prazos;
   S.versaoServidor = d.versao || '';
   S.he.calculos = d.calculos || [];
+  S.avisos = d.avisos || [];
   S.grupos = d.grupos || [];
   if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
   if(S.com.competencia && S.com.competencia !== S.competencia) S.com.competencia = null;
@@ -1593,12 +1646,14 @@ function desenhar(){
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
+  else if(S.aba==='AVISO_PREVIO') c.innerHTML = telaAvisoPrevio();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
   if(S.aba==='COMISSOES') ligarComissoes();
   if(S.aba==='QUEBRAS') ligarQuebras();
   if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
+  if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
 
   /* A janela vem antes: ajustarRolagem mede a altura da tabela a partir da
      posição da página, então devolver a rolagem da janela depois faria a
@@ -3189,7 +3244,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','AVISO_PREVIO'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -3524,6 +3579,261 @@ function quebrasDe(funcId){
 }
 function totalQuebras(funcId){
   return quebrasDe(funcId).reduce((s,q)=>s+valorNum(q.custoTotal), 0);
+}
+
+/* ==================================================================
+   AVISO PRÉVIO
+   Lista de quem está cumprindo aviso. O sistema preenche sozinho o
+   demissional, o término do aviso e a data de pagamento; qualquer um
+   dos três pode ser corrigido à mão, e a partir daí vale a correção.
+   A cor da linha é a situação da rescisão.
+   ================================================================== */
+const AV_SITUACOES = [
+  {v:'NAO_ENVIADO', r:'Não enviado'},
+  {v:'ENVIADO',     r:'Enviado'},
+  {v:'RECEBIDO',    r:'Recebido'},
+  {v:'QUITADO',     r:'Quitado'}
+];
+const AV_OBSERVACOES = ['DESLIGADO','FIM DE CONTRATO','PEDIU DEMISSÃO'];
+
+function diaISO(d){ return d.toISOString().substring(0,10); }
+function dataValida(iso){ return /^\d{4}-\d{2}-\d{2}$/.test(String(iso||'')); }
+function somarDias(iso, dias){
+  if(!dataValida(iso)) return '';
+  const d = new Date(iso+'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return diaISO(d);
+}
+function somarMeses(iso, meses){
+  if(!dataValida(iso)) return '';
+  const d = new Date(iso+'T12:00:00');
+  const dia = d.getDate();
+  d.setMonth(d.getMonth() + meses);
+  /* 31/01 + 1 mês não existe: cai no último dia de fevereiro, não em março */
+  if(d.getDate() < dia) d.setDate(0);
+  return diaISO(d);
+}
+/* anos completos de casa, para o acréscimo de 3 dias da Lei 12.506/2011 */
+function anosDeCasa(adm, ate){
+  if(!dataValida(adm) || !dataValida(ate)) return 0;
+  const a = new Date(adm+'T12:00:00'), b = new Date(ate+'T12:00:00');
+  let n = b.getFullYear() - a.getFullYear();
+  const aniv = new Date(a); aniv.setFullYear(a.getFullYear() + n);
+  if(aniv > b) n--;
+  return Math.max(0, n);
+}
+
+/* Junta o cadastro com o que já foi gravado e calcula o que falta.
+   `calc` diz quais campos ainda são conta do sistema — a tela mostra
+   esses em itálico apagado, para o RH saber o que ninguém conferiu. */
+function avisoDe(f){
+  const g = S.avisos.find(a=>a.funcionarioId===f.id) || {};
+  const calc = {};
+  const obs = g.observacao || '';
+
+  let desligamento = g.desligamento || '';
+  if(!desligamento){ desligamento = f.dataDemissao || ''; calc.desligamento = true; }
+
+  let termino = g.terminoAviso || '';
+  if(!termino){
+    calc.terminoAviso = true;
+    if(!dataValida(desligamento)) termino = '';
+    else if(obs === 'FIM DE CONTRATO') termino = desligamento;
+    else if(obs === 'PEDIU DEMISSÃO') termino = somarDias(desligamento, 30);
+    else {
+      /* dispensa pelo empregador: 30 dias + 3 por ano completo, teto de 90 */
+      const extra = Math.min(60, 3 * anosDeCasa(f.dataAdmissao, desligamento));
+      termino = somarDias(desligamento, 30 + extra);
+    }
+  }
+
+  let pagamento = g.dataPagamento || '';
+  if(!pagamento){
+    calc.dataPagamento = true;
+    /* art. 477 §6º da CLT: até 10 dias corridos do fim do contrato */
+    pagamento = dataValida(termino) ? somarDias(termino, 10) : '';
+  }
+
+  let demissional = g.demissional || '';
+  if(!demissional){
+    calc.demissional = true;
+    const fim = dataValida(termino) ? termino : desligamento;
+    const tresMeses = somarMeses(f.dataAdmissao, 3);
+    demissional = (dataValida(fim) && dataValida(tresMeses) && fim >= tresMeses)
+      ? 'SIM' : (dataValida(fim) && dataValida(tresMeses) ? 'NÃO' : '');
+  }
+
+  return {funcionarioId:f.id, situacao: g.situacao || 'NAO_ENVIADO',
+    observacao: obs, demissional, desligamento, terminoAviso: termino,
+    dataPagamento: pagamento, calc};
+}
+
+function pessoasEmAviso(){
+  const busca = (S.busca||'').trim().toUpperCase();
+  return S.funcionarios
+    .filter(f=>f.status==='AVISO')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=>!busca || f.nome.toUpperCase().includes(busca))
+    .map(f=>({f, av: avisoDe(f)}))
+    /* quem termina o aviso primeiro aparece primeiro: é a fila de trabalho */
+    .sort((a,b)=> (a.av.terminoAviso||'9999').localeCompare(b.av.terminoAviso||'9999')
+                  || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+}
+
+function telaAvisoPrevio(){
+  if(!podeAprovar()){
+    return vazio('Aviso prévio', 'Somente GERENTE RH e MASTER veem esta aba.');
+  }
+  const lista = pessoasEmAviso();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+      S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <button class="btn sec" id="avExcel">Excel</button>
+  </div>
+  <div class="av-legenda">
+    ${AV_SITUACOES.map(x=>`<span><i style="background:var(${
+      x.v==='NAO_ENVIADO'?'--vermelho':x.v==='ENVIADO'?'--ambar':
+      x.v==='RECEBIDO'?'--laranja':'--verde'})"></i>${x.r}</span>`).join('')}
+    <span style="margin-left:auto">Campo em <i style="background:none"></i><em>itálico</em>
+      foi calculado pelo sistema — pode corrigir.</span>
+  </div>`;
+
+  if(!lista.length){
+    return html + vazio('Ninguém em aviso prévio',
+      'Quem estiver com a situação "Aviso prévio" no cadastro aparece aqui.');
+  }
+
+  const conta = {};
+  lista.forEach(x=> conta[x.av.situacao] = (conta[x.av.situacao]||0)+1);
+  html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap">
+    <span><b>${lista.length}</b> ${lista.length===1?'pessoa':'pessoas'} em aviso prévio</span>
+    ${AV_SITUACOES.filter(x=>conta[x.v]).map(x=>
+      `<span>${conta[x.v]} ${x.r.toLowerCase()}</span>`).join(' · ')}
+  </div>`;
+
+  html += `<div class="filial" style="padding:0;overflow:auto">
+    <table class="tab-aviso"><thead><tr>
+      <th class="col-sit">Situação</th><th>Funcionário</th><th class="col-obs">Observações</th>
+      <th>CPF</th><th>Filial</th><th class="col-dem">Demissional</th>
+      <th>Admissão</th><th>Desligamento</th><th>Término do aviso</th><th>Data pagamento</th>
+    </tr></thead><tbody>
+    ${lista.map(x=>linhaAviso(x.f, x.av)).join('')}
+    </tbody></table></div>`;
+  return html;
+}
+
+function linhaAviso(f, a){
+  const campo = (nome, tipo)=>`<input class="entrada mono${a.calc[nome]?' calculado':''}"
+      type="${tipo}" data-av="${esc(f.id)}" data-campo="${nome}"
+      value="${esc(a[nome]||'')}"${a.calc[nome]?' title="Preenchido pelo sistema — edite para corrigir"':''}>`;
+  return `<tr class="av-${esc(a.situacao)}" data-av-linha="${esc(f.id)}">
+    <td class="col-sit"><select class="entrada" data-av="${esc(f.id)}" data-campo="situacao">
+      ${AV_SITUACOES.map(x=>`<option value="${x.v}" ${a.situacao===x.v?'selected':''}>${x.r}</option>`).join('')}
+    </select></td>
+    <td class="av-nome">${esc(f.nome)}${seloExperiencia(f)}</td>
+    <td class="col-obs"><select class="entrada" data-av="${esc(f.id)}" data-campo="observacao">
+      <option value="">—</option>
+      ${AV_OBSERVACOES.map(o=>`<option value="${esc(o)}" ${a.observacao===o?'selected':''}>${esc(o)}</option>`).join('')}
+    </select></td>
+    <td class="mono av-cpf">${esc(f.cpf||'—')}</td>
+    <td class="av-filial">${esc(f.filial||'—')}</td>
+    <td><select class="entrada${a.calc.demissional?' calculado':''}"
+          data-av="${esc(f.id)}" data-campo="demissional"
+          ${a.calc.demissional?'title="Calculado: 3 meses ou mais de casa"':''}>
+      <option value="SIM" ${a.demissional==='SIM'?'selected':''}>SIM</option>
+      <option value="NÃO" ${a.demissional==='NÃO'?'selected':''}>NÃO</option>
+    </select></td>
+    <td class="mono" style="white-space:nowrap">${dataBonita(f.dataAdmissao)}</td>
+    <td>${campo('desligamento','date')}</td>
+    <td>${campo('terminoAviso','date')}</td>
+    <td>${campo('dataPagamento','date')}</td>
+  </tr>`;
+}
+
+/* Edição salva sozinha. Um atraso curto junta as alterações seguidas da
+   mesma linha num envio só — trocar três datas não vira três gravações. */
+const _avTimers = {};
+function ligarAvisoPrevio(){
+  document.querySelectorAll('[data-av]').forEach(c=> c.onchange = ()=>{
+    const id = c.dataset.av;
+    const f = S.funcionarios.find(x=>x.id===id);
+    if(!f) return;
+    const atual = avisoDe(f);
+    const linha = document.querySelector(`[data-av-linha="${id}"]`);
+    const dados = {funcionarioId:id, situacao:atual.situacao, observacao:atual.observacao,
+      demissional:atual.demissional, desligamento:atual.desligamento,
+      terminoAviso:atual.terminoAviso, dataPagamento:atual.dataPagamento};
+    /* tudo o que está na linha vai junto: o que era conta do sistema passa
+       a ser valor gravado, senão a correção de um campo se perderia na
+       próxima vez que o cálculo rodasse */
+    linha.querySelectorAll('[data-av]').forEach(x=>{ dados[x.dataset.campo] = x.value; });
+    if(c.dataset.campo === 'observacao' || c.dataset.campo === 'desligamento'){
+      /* mudou a regra ou a data de partida: o que ainda não foi corrigido
+         à mão é recalculado na hora */
+      const base = Object.assign({}, dados);
+      ['terminoAviso','dataPagamento','demissional'].forEach(k=>{
+        if(atual.calc[k]) delete base[k];
+      });
+      Object.assign(dados, recalcularAviso(f, base));
+    }
+    /* pinta a linha na hora, sem esperar a nuvem */
+    linha.className = 'av-' + dados.situacao;
+    guardarAviso(f, dados);
+  });
+  const b = document.getElementById('avExcel');
+  if(b) b.onclick = exportarAvisosExcel;
+}
+
+/* Refaz as contas com os valores que a pessoa acabou de escolher. */
+function recalcularAviso(f, dados){
+  const guardados = S.avisos.slice();
+  S.avisos = guardados.filter(a=>a.funcionarioId!==f.id).concat([
+    Object.assign({funcionarioId:f.id}, dados)]);
+  const novo = avisoDe(f);
+  S.avisos = guardados;
+  return {demissional:novo.demissional, terminoAviso:novo.terminoAviso,
+          dataPagamento:novo.dataPagamento};
+}
+
+function guardarAviso(f, dados){
+  clearTimeout(_avTimers[f.id]);
+  _avTimers[f.id] = setTimeout(async ()=>{
+    try{
+      await api('salvarAviso', {aviso:dados}, {silencioso:true});
+      S.avisos = S.avisos.filter(a=>a.funcionarioId!==f.id)
+        .concat([Object.assign({funcionarioId:f.id}, dados)]);
+      desenhar();
+      toast('Aviso prévio de '+f.nome.split(' ')[0]+' salvo.');
+    }catch(e){ toast(e.message, true); }
+  }, 600);
+}
+
+async function exportarAvisosExcel(){
+  await usar('xlsx');
+  const lista = pessoasEmAviso();
+  const rotulo = v => (AV_SITUACOES.find(x=>x.v===v)||{}).r || v;
+  const dados = [['SITUAÇÃO','FUNCIONÁRIO','OBSERVAÇÕES','CPF','FILIAL','DEMISSIONAL',
+    'ADMISSÃO','DESLIGAMENTO','TÉRMINO DO AVISO','DATA PAGAMENTO']]
+    .concat(lista.map(({f,av})=>[rotulo(av.situacao), f.nome, av.observacao, f.cpf||'',
+      f.filial||'', av.demissional, dataBonita(f.dataAdmissao),
+      dataBonita(av.desligamento), dataBonita(av.terminoAviso),
+      dataBonita(av.dataPagamento)]));
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  ws['!cols'] = [{wch:14},{wch:36},{wch:18},{wch:16},{wch:18},{wch:12},
+                 {wch:13},{wch:14},{wch:17},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'AVISO PREVIO');
+  XLSX.writeFile(wb, 'AVISO PREVIO '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
 }
 
 function telaQuebras(){
@@ -4309,7 +4619,8 @@ async function salvarFolha(silencioso){
    de dias e a marcação de quem quer vale. O que interessa fora do sistema é
    o total de cada um. A coluna VALE dos lançamentos também sai — o valor que
    vale é o VALE MENSAL. A tela continua com tudo, porque lá se edita. */
-const FORA_DO_RELATORIO = ['GRUPO','VT/DIA','DIAS','VR/DIA','QUER VALE','VALE'];
+const FORA_DO_RELATORIO = ['GRUPO','VT/DIA','DIAS','TOTAL VT','VR/DIA','TOTAL VR',
+  'QUER VALE','VALE'];
 
 function semColunas(t, fora){
   const corta = new Set(fora);
@@ -4388,18 +4699,52 @@ async function exportarFolhaPdf(){
     const fonte = await doc.embedFont(StandardFonts.Helvetica);
     const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
     const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
-    const {cab, linhas, total} = semColunas(tabelaFolha(), FORA_DO_RELATORIO);
+    /* O PDF leva as mesmas colunas da planilha: depois que os totais de VT e
+       VR saíram, o que resta do lado do vale é só o vale mensal — sem os
+       lançamentos o relatório não diria nada. */
+    const {cab, linhas, total} = semColunas(tabelaFolhaUnida(), FORA_DO_RELATORIO);
     const L=841.89, A=595.28, m=30;
-    /* com menos colunas sobra largura: o nome respira e as observações, que
-       antes nem cabiam na folha, passam a sair impressas */
-    const LARGURAS = {'FUNCIONÁRIO':210, 'FILIAL':120, 'OBSERVAÇÕES':215};
-    const larg = cab.map(c=> LARGURAS[c] || 78);
+    /* nome, filial e observações têm largura própria; o resto divide o que
+       sobra em partes iguais, para caber tudo numa folha A4 deitada */
+    const FIXAS = {'FUNCIONÁRIO':132, 'FILIAL':72, 'OBSERVAÇÕES':84};
+    const sobra = (L - 2*m) - cab.reduce((t,c)=> t + (FIXAS[c]||0), 0);
+    const quantas = cab.filter(c=>!FIXAS[c]).length || 1;
+    const larg = cab.map(c=> FIXAS[c] || sobra/quantas);
     const xs = []; let acc = m;
     larg.forEach(w=>{ xs.push(acc); acc += w; });
-    /* o que cabe na coluna, na fonte usada */
-    const corta = (t,max)=>{ t=String(t||''); return t.length>max?t.slice(0,max-1)+'…':t; };
-    const cabe = i => Math.max(4, Math.floor(larg[i]/4.3));
-    const destaque = cab.map(c=>/^TOTAL |^VALE MENSAL$/.test(c));
+    const destaque = cab.map(c=>/^VALE MENSAL$/.test(c));
+    /* Largura medida na própria fonte, não estimada por número de letras:
+       contar caracteres faz um título invadir a coluna do lado. */
+    const GAP = 5;
+    const encurta = (t, f, tam, max)=>{
+      t = String(t||'');
+      if(f.widthOfTextAtSize(t, tam) <= max) return t;
+      let r = t;
+      while(r.length > 1 && f.widthOfTextAtSize(r + '…', tam) > max) r = r.slice(0, -1);
+      return r + '…';
+    };
+    /* Título de coluna empilhado em até três linhas: "QUEBRA DE PRODUTOS"
+       não cabe numa coluna estreita, e abreviar o nome de uma verba num
+       relatório de folha é pedir confusão. Quebra sempre num espaço. */
+    const ALTURA_CAB = 7;
+    const quebrar = (t, max)=>{
+      const partes = String(t||'').split(' ');
+      /* uma palavra comprida sozinha ("COMISSÕES") não quebra: em vez de
+         abreviar o nome da verba, diminui a letra daquela coluna */
+      let tam = 6;
+      while(tam > 4.6 && partes.some(x=>fonteB.widthOfTextAtSize(x, tam) > max)) tam -= .2;
+      const ls = []; let a = '';
+      partes.forEach(x=>{
+        const tenta = a ? a + ' ' + x : x;
+        if(a && fonteB.widthOfTextAtSize(tenta, tam) > max){ ls.push(a); a = x; }
+        else a = tenta;
+      });
+      if(a) ls.push(a);
+      if(ls.length > 3) ls.splice(2, ls.length, ls.slice(2).join(' '));
+      return {linhas: ls.map(l=>encurta(l, fonteB, tam, max)), tam};
+    };
+    const titulos = cab.map((t,i)=>quebrar(t, larg[i]-GAP));
+    const linhasCab = Math.max(...titulos.map(x=>x.linhas.length));
 
     let pg, y;
     const cabecalho = ()=>{
@@ -4407,20 +4752,22 @@ async function exportarFolhaPdf(){
       const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
       pg.drawText('Folha de pagamento · '+compBonita(S.competencia),
         {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
-      y -= 44;
-      cab.forEach((t,i)=>
-        pg.drawText(corta(t, Math.floor(larg[i]/3.3)),
-          {x:xs[i], y, size:6.5, font:fonteB, color:rgb(.42,.45,.5)}));
-      y -= 6;
+      y -= 36;
+      titulos.forEach((c,i)=> c.linhas.forEach((l,k)=>
+        pg.drawText(l, {x:xs[i], y:y-k*ALTURA_CAB, size:c.tam, font:fonteB,
+          color:rgb(.42,.45,.5)})));
+      y -= (linhasCab-1)*ALTURA_CAB + 7;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.7, color:rgb(.8,.83,.86)});
       y -= 12;
     };
     cabecalho();
     linhas.forEach(l=>{
       if(y < m+26) cabecalho();
-      l.forEach((t,i)=>
-        pg.drawText(corta(t, cabe(i)),{x:xs[i], y, size:7.5,
-          font: destaque[i]?fonteB:fonte, color:rgb(.06,.07,.08)}));
+      l.forEach((t,i)=>{
+        const f = destaque[i] ? fonteB : fonte;
+        pg.drawText(encurta(t, f, 7, larg[i]-GAP),
+          {x:xs[i], y, size:7, font:f, color:rgb(.06,.07,.08)});
+      });
       y -= 7;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
       y -= 11;
@@ -4428,7 +4775,8 @@ async function exportarFolhaPdf(){
     if(y < m+26) cabecalho();
     y -= 3;
     total.forEach((t,i)=>{
-      if(t) pg.drawText(corta(t, cabe(i)),{x:xs[i], y, size:8, font:fonteB});
+      if(t) pg.drawText(encurta(t, fonteB, 7.5, larg[i]-GAP),
+        {x:xs[i], y, size:7.5, font:fonteB});
     });
     baixar(new Blob([await doc.save()],{type:'application/pdf'}),
       'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.pdf');
@@ -4453,7 +4801,7 @@ const COLS_CONT = [
   {campo:'comissoes',  titulo:'COMISSÕES',         tipo:'dinheiro',puxa:true},
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
-  {campo:'vt',         titulo:'VT',                tipo:'dinheiro'},
+  {campo:'vt',         titulo:'VT MÊS ATUAL',      tipo:'dinheiro'},
   {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro',puxa:true},
   {campo:'premiacao',  titulo:'PREMIAÇÃO',         tipo:'dinheiro'}
 ];
@@ -4784,8 +5132,13 @@ async function exportarContPdf(){
    GERENTE RH e MASTER continuam na tela completa, que é onde conferem,
    aprovam e exportam.
    ================================================================== */
+/* A tela de celular é para o gerente de loja, que anexa documentos de pé
+   dentro da filial. Quem não tem filial nem a aba de anexar — um usuário de
+   escritório com acesso só a Quebras, por exemplo — usa a tela normal, com
+   a barra de abas no lugar. */
 function interfaceCelular(){
-  return S.sessao && S.sessao.papel === 'GERENTE';
+  return !!(S.sessao && S.sessao.papel === 'GERENTE' && S.sessao.filial
+            && (S.sessao.abas || []).includes('ANEXAR'));
 }
 
 /* Estado dos envios em andamento, por funcionário e tipo de documento.
