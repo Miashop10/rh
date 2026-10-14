@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.14a';
+  const VERSAO_APP = '2026.10.14e';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -2123,6 +2123,455 @@ function confirmarExclusao(funcId){
   return el;
 }
 
+/* ==================================================================
+   FICHA COMPLETA DO FUNCIONÁRIO
+   Dados pessoais que só o RH enxerga, e só ao abrir o cadastro para
+   editar: não entram na lista de funcionários, que é carregada no
+   telefone de cada gerente de loja. Por isso são buscados à parte,
+   quando a tela de edição abre.
+   ================================================================== */
+const CAMPOS_FICHA = ['horarioTrabalho','salario','conducoesIda','conducoesVolta',
+  'rg','orgaoEmissor','expedicao','pis','ctps','nascimento','escolaridade',
+  'filhosMenores14','nomePai','nomeMae','etnia','endereco','celular','email'];
+
+const ESCOLARIDADES = ['Fundamental incompleto','Fundamental completo',
+  'Médio incompleto','Médio completo','Técnico','Superior incompleto',
+  'Superior completo','Pós-graduação'];
+/* as mesmas opções que o eSocial usa para raça/cor */
+const ETNIAS = ['Branca','Preta','Parda','Amarela','Indígena','Não informado'];
+
+function camposDaFicha(d){
+  d = d || {};
+  const v = c => esc(d[c] || '');
+  const texto = (c, rot, dica, largo) => `
+    <div${largo?' class="full"':''}><label class="campo-lbl" for="fi_${c}">${rot}</label>
+      <input class="entrada" id="fi_${c}" value="${v(c)}"${dica?` placeholder="${dica}"`:''}></div>`;
+  const data = (c, rot) => `
+    <div><label class="campo-lbl" for="fi_${c}">${rot}</label>
+      <input class="entrada" type="date" id="fi_${c}" value="${v(c)}"></div>`;
+  const escolhe = (c, rot, ops) => `
+    <div><label class="campo-lbl" for="fi_${c}">${rot}</label>
+      <select class="entrada" id="fi_${c}">
+        <option value="">—</option>
+        ${ops.map(o=>`<option value="${esc(o)}" ${d[c]===o?'selected':''}>${esc(o)}</option>`).join('')}
+      </select></div>`;
+
+  return `
+    ${texto('horarioTrabalho','Horário de trabalho','Ex.: 14:00 às 22:20', true)}
+    ${texto('salario','Salário','R$')}
+    <div>
+      <label class="campo-lbl">Nº de conduções</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="campo-lbl" style="margin:0">ida</span>
+        <input class="entrada mono" type="number" min="0" max="9" id="fi_conducoesIda"
+               value="${v('conducoesIda')}" style="width:62px">
+        <span class="campo-lbl" style="margin:0">volta</span>
+        <input class="entrada mono" type="number" min="0" max="9" id="fi_conducoesVolta"
+               value="${v('conducoesVolta')}" style="width:62px">
+      </div>
+    </div>
+    ${texto('rg','RG')}
+    ${texto('orgaoEmissor','Órgão','SSP/PR')}
+    ${data('expedicao','Expedição')}
+    ${texto('pis','P.I.S')}
+    ${texto('ctps','CTPS','Número e série')}
+    ${data('nascimento','Nascimento')}
+    ${escolhe('escolaridade','Escolaridade', ESCOLARIDADES)}
+    <div><label class="campo-lbl" for="fi_filhosMenores14">Filhos menores de 14 anos</label>
+      <select class="entrada" id="fi_filhosMenores14">
+        <option value="">—</option>
+        <option value="NAO" ${d.filhosMenores14==='NAO'?'selected':''}>Não</option>
+        <option value="SIM" ${d.filhosMenores14==='SIM'?'selected':''}>Sim</option>
+      </select></div>
+    ${escolhe('etnia','Etnia', ETNIAS)}
+    ${texto('nomePai','Nome do pai','', true)}
+    ${texto('nomeMae','Nome da mãe','', true)}
+    ${texto('endereco','Endereço','Rua, número, complemento, bairro, cidade e CEP', true)}
+    ${texto('celular','Celular','(41) 90000-0000')}
+    ${texto('email','E-mail')}`;
+}
+
+/* Busca a ficha e troca o bloco pelos campos preenchidos. Enquanto não
+   chega, os campos ficam na tela em branco e o salvar não os envia —
+   senão um cadastro salvo às pressas apagaria o que já estava gravado. */
+async function carregarFicha(el, id){
+  const caixa = el.querySelector('#fichaCompleta');
+  if(!caixa) return;
+  if(!id){ el._fichaPronta = true; return; }   /* cadastro novo: nada a buscar */
+  try{
+    const d = await api('fichaFuncionario', {id}, {silencioso:true});
+    if(!document.body.contains(el)) return;
+    caixa.innerHTML = camposDaFicha(d);
+    el._fichaPronta = true;
+    ['#fFicha','#fLgpd'].forEach(q=>{
+      const b = el.querySelector(q);
+      if(b) b.disabled = false;
+    });
+  }catch(e){
+    caixa.innerHTML = `<div class="full aviso erro">Não foi possível abrir a ficha
+      completa: ${esc(e.message)}. Salvar o cadastro não vai apagar esses dados.</div>`;
+  }
+}
+
+/* ==================================================================
+   FICHA DE CADASTRO EM PDF
+   Uma folha A4 com tudo o que o RH tem do funcionário, agrupado como
+   no papel: identificação, documentos, contato, contrato e banco.
+   Campo em branco sai com um traço, para dar para completar à mão.
+   ================================================================== */
+async function exportarFichaCadastro(f, ficha){
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+
+    const L = 595.28, A = 841.89, m = 42;
+    const tinta = rgb(.06,.07,.08), apagado = rgb(.42,.45,.5), linha = rgb(.84,.86,.89);
+    let pg = doc.addPage([L,A]);
+    let y = A - 46;
+
+    const hLogo = 20;
+    pg.drawImage(logo, {x:m, y:y-hLogo+6, width: logo.width*hLogo/logo.height, height:hLogo});
+    pg.drawText('FICHA DE CADASTRO', {x:L-m-fonteB.widthOfTextAtSize('FICHA DE CADASTRO',13),
+      y:y-8, size:13, font:fonteB, color:tinta});
+    y -= 34;
+    pg.drawText(String(f.nome||''), {x:m, y, size:15, font:fonteB, color:tinta});
+    y -= 14;
+    const sub = [f.filial, f.cargo, (SITUACOES[f.status]||{}).rotulo].filter(Boolean).join('  ·  ');
+    pg.drawText(sub, {x:m, y, size:9, font:fonte, color:apagado});
+    y -= 10;
+    pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.8, color:linha});
+    y -= 22;
+
+    const folhaNova = ()=>{ pg = doc.addPage([L,A]); y = A - 50; };
+    const titulo = t=>{
+      if(y < m+70) folhaNova();
+      pg.drawText(t.toUpperCase(), {x:m, y, size:8, font:fonteB, color:apagado});
+      y -= 5;
+      pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.5, color:linha});
+      y -= 15;
+    };
+    /* duas colunas; um campo largo ocupa a linha inteira */
+    const COL = (L - 2*m) / 2;
+    let coluna = 0;
+    /* a ficha tem de caber numa folha só: é ela que vai para a pasta */
+    const ALT = 28;
+    const campo = (rot, val, largo)=>{
+      if(largo && coluna === 1){ y -= ALT; coluna = 0; }
+      if(y < m+40) { folhaNova(); coluna = 0; }
+      const x = m + coluna*COL;
+      const larg = (largo ? 2 : 1) * COL - 12;
+      pg.drawText(rot, {x, y, size:7, font:fonteB, color:apagado});
+      let texto = String(val == null ? '' : val).trim() || '—';
+      while(fonte.widthOfTextAtSize(texto, 10) > larg && texto.length > 2){
+        texto = texto.slice(0, -2) + '…';
+      }
+      pg.drawText(texto, {x, y:y-12, size:10, font:fonte, color:tinta});
+      pg.drawLine({start:{x, y:y-16}, end:{x:x+larg, y:y-16}, thickness:.5, color:linha});
+      if(largo || coluna === 1){ y -= ALT; coluna = 0; } else { coluna = 1; }
+    };
+    const fim = ()=>{ if(coluna === 1){ y -= ALT; coluna = 0; } y -= 5; };
+    const d = ficha || {};
+    const dt = v => v ? dataBonita(v) : '';
+
+    titulo('Identificação');
+    campo('Nome completo', f.nome, true);
+    campo('Nascimento', dt(d.nascimento));
+    campo('Etnia', d.etnia);
+    campo('Nome do pai', d.nomePai, true);
+    campo('Nome da mãe', d.nomeMae, true);
+    campo('Escolaridade', d.escolaridade);
+    campo('Filhos menores de 14 anos', d.filhosMenores14 === 'SIM' ? 'Sim'
+      : d.filhosMenores14 === 'NAO' ? 'Não' : '');
+    fim();
+
+    titulo('Documentos');
+    campo('CPF', f.cpf);
+    campo('RG', d.rg);
+    campo('Órgão', d.orgaoEmissor);
+    campo('Expedição', dt(d.expedicao));
+    campo('P.I.S', d.pis);
+    campo('CTPS', d.ctps);
+    fim();
+
+    titulo('Contato');
+    campo('Endereço', d.endereco, true);
+    campo('Celular', d.celular);
+    campo('E-mail', d.email);
+    fim();
+
+    titulo('Contrato de trabalho');
+    campo('Filial', f.filial);
+    campo('Cargo', f.cargo);
+    campo('Admissão', dt(f.dataAdmissao));
+    campo('Início', dt(f.dataInicio));
+    campo('Horário de trabalho', d.horarioTrabalho, true);
+    campo('Salário', d.salario ? 'R$ ' + d.salario : '');
+    campo('Nº de conduções', (d.conducoesIda || d.conducoesVolta)
+      ? 'ida (' + (d.conducoesIda||'0') + ')   volta (' + (d.conducoesVolta||'0') + ')' : '');
+    campo('Situação', (SITUACOES[f.status]||{}).rotulo);
+    campo('Demissão', dt(f.dataDemissao));
+    fim();
+
+    titulo('Dados bancários');
+    campo('Banco', f.banco);
+    campo('Agência', f.agencia);
+    campo('Conta', f.conta ? f.conta + (f.tipoConta==='POUPANCA' ? '  (poupança)' : '  (corrente)') : '');
+    campo('Recebe vale mensal', f.recebeVale === 'NAO' ? 'Não' : 'Sim');
+    fim();
+
+    /* assinatura: a ficha é impressa e guardada na pasta do funcionário */
+    if(y < m+62) folhaNova();
+    y -= 18;
+    const meia = (L - 2*m - 40) / 2;
+    [[m, f.nome || 'Funcionário'], [m+meia+40, 'Miashop · Recursos Humanos']].forEach(([x,rot])=>{
+      pg.drawLine({start:{x, y}, end:{x:x+meia, y}, thickness:.6, color:tinta});
+      pg.drawText(rot, {x, y:y-11, size:8, font:fonte, color:apagado});
+    });
+    y -= 26;
+    pg.drawText('Curitiba, _____ de ______________________ de ________.',
+      {x:m, y, size:9, font:fonte, color:apagado});
+
+    pg.drawText('Emitida em ' + dataBonita(new Date().toISOString().substring(0,10)),
+      {x:m, y:m-8, size:7.5, font:fonte, color:apagado});
+
+    baixar(new Blob([await doc.save()], {type:'application/pdf'}),
+      'FICHA DE CADASTRO - ' + (f.nome||'FUNCIONARIO') + '.pdf');
+    toast('Ficha de cadastro gerada.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+/* ==================================================================
+   TERMO DE CONSENTIMENTO LGPD
+   O texto é o do RH, palavra por palavra. O sistema só preenche o que
+   é do funcionário: nome, CPF, CNPJ da filial, escolaridade e data.
+   O que o próprio modelo deixa em branco (os serviços contratados)
+   continua em branco, para ser completado à mão.
+   ================================================================== */
+const EMPRESA_LGPD = 'MIASHOP CONVENIÊNCIAS LTDA';
+const CIDADE_LGPD = 'Curitiba';
+const MESES_EXT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho',
+  'Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function dataPorExtenso(iso){
+  const p = String(iso).split('-');
+  return CIDADE_LGPD + ', ' + (+p[2]) + ' de ' + MESES_EXT[(+p[1])-1] + ' de ' + p[0] + '.';
+}
+
+function textoTermoLGPD(f, ficha, cnpj){
+  const d = ficha || {};
+  const linha = v => String(v || '').trim() || '_________________________';
+  return [
+    {t:'titulo', x:'TERMO DE CONSENTIMENTO PARA TRATAMENTO'},
+    {t:'titulo', x:'DE DADOS PESSOAIS'},
+    {t:'titulo', x:'LEI GERAL DE PROTEÇÃO DE DADOS PESSOAIS - LGPD'},
+    {t:'espaco'},
+    {t:'p', x:'Através do presente instrumento, eu '+linha(f.nome)+', inscrito(a) no CPF '+
+       'sob o n°. '+linha(f.cpf)+', aqui denominado(a) como TITULAR, venho por meio deste, '+
+       'autorizar que a empresa '+EMPRESA_LGPD+', aqui denominada como CONTROLADORA, '+
+       'inscrita no CNPJ sob n°. '+linha(cnpj)+', em razão do contrato de trabalho, '+
+       'disponha dos meus dados pessoais e dados pessoais sensíveis, de acordo com os '+
+       'artigos 7° e 11 da Lei n° 13.709/2018, conforme disposto neste termo:'},
+    {t:'clausula', x:'CLÁUSULA PRIMEIRA'}, {t:'sub', x:'Dados Pessoais'},
+    {t:'p', x:'O Titular autoriza a Controladora a realizar o tratamento, ou seja, a '+
+       'utilizar os seguintes dados pessoais, para os fins que serão relacionados na '+
+       'cláusula segunda:'},
+    {t:'i', x:'Nome completo;'},
+    {t:'i', x:'Data de nascimento;'},
+    {t:'i', x:'Número e imagem da Carteira de Identidade (RG);'},
+    {t:'i', x:'Número e imagem do Cadastro de Pessoas Físicas (CPF);'},
+    {t:'i', x:'Número e imagem do Título de Eleitor;'},
+    {t:'i', x:'Número e imagem do Certificado de Reservista;'},
+    {t:'i', x:'Número e imagem da Carteira Nacional de Habilitação (CNH) (quando '+
+       'necessário para a função contratada);'},
+    {t:'i', x:'Número e Imagem do cartão de vale transporte (quando utilizado pelo empregado);'},
+    {t:'i', x:'Número e imagem do Programa de Integração Social (PIS);'},
+    {t:'i', x:'CTPS física e/ou digital;'},
+    {t:'i', x:'Fotografia 3x4;'},
+    {t:'i', x:'Imagem da Certidão de Casamento ou Declaração de União Estável;'},
+    {t:'i', x:'Imagem do Diploma de '+linha(d.escolaridade)+
+       ' (Nível de instrução ou escolaridade);'},
+    {t:'i', x:'Endereço completo;'},
+    {t:'i', x:'Números de telefone, WhatsApp e endereços de e-mail;'},
+    {t:'i', x:'Banco, agência e número de contas bancárias;'},
+    {t:'i', x:'Nome de usuário e senha específicos para uso dos serviços da Controladora;'},
+    {t:'i', x:'Comunicação, verbal e escrita, mantida entre o Titular e o Controlador;'},
+    {t:'i', x:'Exames e atestados médicos, especialmente admissionais, periódicos, '+
+       'incluídos de retorno por afastamento superior a 30 dias em caso de doença, '+
+       'acidente ou parto, de mudança de função, demissionais e ainda aqueles que '+
+       'atestem doença ou acidente;'},
+    {t:'i', x:'Certidão de nascimento dos filhos menores de 14 anos, Carteira de vacinação '+
+       'dos menores de 7 anos, e atestado de matrícula e frequência escolar semestral '+
+       'dos maiores de 4 anos;'},
+    {t:'i', x:'Imagem e número se possuir registro conselho regional.'},
+    {t:'clausula', x:'CLÁUSULA SEGUNDA'}, {t:'sub', x:'Finalidade do Tratamento dos Dados'},
+    {t:'p', x:'O Titular autoriza que a Controladora utilize os dados pessoais e dados '+
+       'pessoais sensíveis listados neste termo para as seguintes finalidades:'},
+    {t:'i', x:'Permitir que a Controladora identifique e entre em contato com o titular, '+
+       'em razão do contrato de trabalho;'},
+    {t:'i', x:'Para cumprimento de obrigações decorrentes da legislação, principalmente '+
+       'trabalhista e previdenciária, incluindo o disposto em Acordo ou Convenção '+
+       'Coletiva da categoria da Controladora;'},
+    {t:'i', x:'Para procedimentos de admissão e execução do contrato de trabalho, '+
+       'inclusive após seu término;'},
+    {t:'i', x:'Para cumprimento, pela Controladora, de obrigações impostas por órgãos '+
+       'de fiscalização;'},
+    {t:'i', x:'Quando necessário para a executar um contrato, no qual seja parte o titular;'},
+    {t:'i', x:'A pedido do titular dos dados;'},
+    {t:'i', x:'Para o exercício regular de direitos em processo judicial, administrativo '+
+       'ou arbitral;'},
+    {t:'i', x:'Para a proteção da vida ou da incolumidade física do titular ou de terceiros;'},
+    {t:'i', x:'Para a tutela da saúde, exclusivamente, em procedimento realizado por '+
+       'profissionais de saúde, serviços de saúde ou autoridade sanitária;'},
+    {t:'i', x:'Quando necessário para atender aos interesses legítimos do controlador ou '+
+       'de terceiros, exceto no caso de prevalecerem direitos e liberdades fundamentais '+
+       'do titular que exijam a proteção dos dados pessoais;'},
+    {t:'i', x:'Para contratação de serviços de ______________________ (por exemplo: vale '+
+       'alimentação, plano de saúde e odontológico, seguro de vida, seguro previdência '+
+       'privada dentre outros) com a Empresa ______________________, de modo que somente '+
+       'serão repassados para a empresa contratada os dados pessoais de identificação '+
+       'do titular);'},
+    {t:'i', x:'Permitir que a Controladora utilize esses dados para a contratação e '+
+       'prestação de serviços diversos dos inicialmente ajustados, desde que o Titular '+
+       'também demonstre interesse em contratar novos serviços.'},
+    {t:'p', x:'Parágrafo Primeiro: Caso seja necessário o compartilhamento de dados com '+
+       'terceiros que não tenham sido relacionados nesse termo ou qualquer alteração '+
+       'contratual posterior, será ajustado novo termo de consentimento para este fim '+
+       '(§ 6° do artigo 8° e § 2° do artigo 9° da Lei n° 13.709/2018).'},
+    {t:'p', x:'Parágrafo Segundo: Em caso de alteração na finalidade, que esteja em '+
+       'desacordo com o consentimento original, a Controladora deverá comunicar o '+
+       'Titular, que poderá revogar o consentimento, conforme previsto na cláusula sexta.'},
+    {t:'clausula', x:'CLÁUSULA TERCEIRA'}, {t:'sub', x:'Compartilhamento de Dados'},
+    {t:'p', x:'A Controladora fica autorizada a compartilhar os dados pessoais do Titular '+
+       'com outros agentes de tratamento de dados, caso seja necessário para as '+
+       'finalidades listadas neste instrumento, desde que, sejam respeitados os '+
+       'princípios da boa-fé, finalidade, adequação, necessidade, livre acesso, '+
+       'qualidade dos dados, transparência, segurança, prevenção, não discriminação e '+
+       'responsabilização e prestação de contas.'},
+    {t:'clausula', x:'CLÁUSULA QUARTA'},
+    {t:'sub', x:'Responsabilidade pela Segurança dos Dados'},
+    {t:'p', x:'A Controladora se responsabiliza por manter medidas de segurança, técnicas '+
+       'e administrativas suficientes a proteger os dados pessoais do Titular e à '+
+       'Autoridade Nacional de Proteção de Dados (ANPD), comunicando ao Titular, caso '+
+       'ocorra algum incidente de segurança que possa acarretar risco ou dano relevante, '+
+       'conforme artigo 48 da Lei n° 13.709/2020.'},
+    {t:'clausula', x:'CLÁUSULA QUINTA'}, {t:'sub', x:'Término do Tratamento dos Dados'},
+    {t:'p', x:'À Controladora, é permitido manter e utilizar os dados pessoais do Titular '+
+       'durante todo o período contratualmente firmado para as finalidades relacionadas '+
+       'nesse termo e ainda após o término da contratação para cumprimento de obrigação '+
+       'legal ou impostas por órgãos de fiscalização, nos termos do artigo 16 da Lei '+
+       'n° 13.709/2018.'},
+    {t:'clausula', x:'CLÁUSULA SEXTA'}, {t:'sub', x:'Direito de Revogação do Consentimento'},
+    {t:'p', x:'O Titular poderá revogar seu consentimento, a qualquer tempo, por e-mail ou '+
+       'por carta escrita, conforme o artigo 8°, § 5°, da Lei n° 13.709/2020.'},
+    {t:'p', x:'O Titular fica ciente de que a Controladora poderá permanecer utilizando os '+
+       'dados para as seguintes finalidades:'},
+    {t:'i', x:'Para cumprimento de obrigações decorrentes da legislação trabalhista e '+
+       'previdenciária, incluindo o disposto em Acordo ou Convenção Coletiva da '+
+       'categoria da Controladora;'},
+    {t:'i', x:'Para procedimentos de admissão e execução do contrato de trabalho, '+
+       'inclusive após seu término;'},
+    {t:'i', x:'Para cumprimento, pela Controladora, de obrigações impostas por órgãos de '+
+       'fiscalização;'},
+    {t:'i', x:'Para o exercício regular de direitos em processo judicial, administrativo '+
+       'ou arbitral;'},
+    {t:'i', x:'Para a proteção da vida ou da incolumidade física do titular ou de terceiros;'},
+    {t:'i', x:'Para a tutela da saúde, exclusivamente, em procedimento realizado por '+
+       'profissionais de saúde, serviços de saúde ou autoridade sanitária;'},
+    {t:'i', x:'Quando necessário para atender aos interesses legítimos do controlador ou de '+
+       'terceiros, exceto no caso de prevalecerem direitos e liberdades fundamentais do '+
+       'titular que exijam a proteção dos dados pessoais.'},
+    {t:'clausula', x:'CLÁUSULA SÉTIMA'},
+    {t:'sub', x:'Tempo de Permanência dos Dados Recolhidos'},
+    {t:'p', x:'O titular fica ciente de que a Controladora deverá permanecer com os seus '+
+       'dados pelo período mínimo de guarda de documentos trabalhistas, previdenciários, '+
+       'bem como os relacionados à segurança e saúde no trabalho, mesmo após o '+
+       'encerramento do vínculo empregatício.'},
+    {t:'clausula', x:'CLÁUSULA OITAVA'},
+    {t:'sub', x:'Vazamento de Dados ou Acessos Não Autorizados - Penalidades'},
+    {t:'p', x:'As partes poderão entrar em acordo, quanto aos eventuais danos causados, '+
+       'caso exista o vazamento de dados pessoais ou acessos não autorizados, e caso não '+
+       'haja acordo, a Controladora tem ciência que estará sujeita às penalidades '+
+       'previstas no artigo 52 da Lei n° 13.709/2018:'},
+    {t:'espaco'},
+    {t:'p', x: dataPorExtenso(new Date().toISOString().substring(0,10))},
+    {t:'p', x:'Assinaturas:'},
+    {t:'assinaturas', a: linha(f.nome), b: EMPRESA_LGPD}
+  ];
+}
+
+async function exportarTermoLGPD(f, ficha){
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.TimesRoman);
+    const fonteB = await doc.embedFont(StandardFonts.TimesRomanBold);
+    const L = 595.28, A = 841.89, m = 56;
+    const LARG = L - 2*m;
+    const tinta = rgb(.06,.07,.08);
+    let pg = doc.addPage([L,A]);
+    let y = A - m;
+
+    const espaco = (tam)=>{ y -= tam; if(y < m + 40){ pg = doc.addPage([L,A]); y = A - m; } };
+    /* quebra de linha medida na própria fonte, palavra a palavra */
+    const quebrar = (txt, fnt, tam, larg)=>{
+      const out = []; let atual = '';
+      String(txt).split(' ').forEach(p=>{
+        const tenta = atual ? atual + ' ' + p : p;
+        if(atual && fnt.widthOfTextAtSize(tenta, tam) > larg){ out.push(atual); atual = p; }
+        else atual = tenta;
+      });
+      if(atual) out.push(atual);
+      return out;
+    };
+    const escrever = (txt, {fnt=fonte, tam=10.5, alt=14, recuo=0, pendente=0,
+                            centro=false}={})=>{
+      quebrar(txt, fnt, tam, LARG - recuo - pendente).forEach((ln,i)=>{
+        if(y < m + 24){ pg = doc.addPage([L,A]); y = A - m; }
+        const x = centro ? (L - fnt.widthOfTextAtSize(ln, tam))/2
+                         : m + recuo + (i ? pendente : 0);
+        pg.drawText(ln, {x, y, size:tam, font:fnt, color:tinta});
+        y -= alt;
+      });
+    };
+
+    textoTermoLGPD(f, ficha, (S.filiais.find(x=>x.nome===f.filial)||{}).cnpj)
+      .forEach(b=>{
+        if(b.t === 'titulo') escrever(b.x, {fnt:fonteB, tam:12, alt:16, centro:true});
+        else if(b.t === 'espaco') espaco(12);
+        else if(b.t === 'clausula'){
+          espaco(8); escrever(b.x, {fnt:fonteB, tam:11, alt:14, centro:true});
+        }
+        else if(b.t === 'sub'){ escrever(b.x, {fnt:fonteB, tam:10.5, alt:16, centro:true}); }
+        else if(b.t === 'i'){ escrever('- ' + b.x, {recuo:10, pendente:8, alt:13}); espaco(1); }
+        else if(b.t === 'assinaturas'){
+          espaco(26);
+          [b.a, b.b].forEach(nome=>{
+            if(y < m + 50){ pg = doc.addPage([L,A]); y = A - m; }
+            pg.drawText('__________________________________',
+              {x:m, y, size:10.5, font:fonte, color:tinta});
+            y -= 14;
+            pg.drawText(nome, {x:m, y, size:10.5, font:fonte, color:tinta});
+            y -= 34;
+          });
+        }
+        else { escrever(b.x); espaco(6); }
+      });
+
+    baixar(new Blob([await doc.save()], {type:'application/pdf'}),
+      'TERMO LGPD - ' + (f.nome||'FUNCIONARIO') + '.pdf');
+    toast('Termo LGPD gerado.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
@@ -2191,12 +2640,27 @@ function abrirFuncionario(id, extra){
           <div class="prazo" id="dicaGrupo" style="font-size:12px;color:var(--apagado);margin-top:6px"></div>
         </div>
         <div class="full" id="boxCnpj"></div>
-        <div class="full"><label class="campo-lbl" for="fObs">Observações</label>
+      </div>
+
+      <div class="titulo-grupo">Ficha completa
+        <small>só aparece aqui, ao editar</small></div>
+      <div class="grade" id="fichaCompleta">
+        ${camposDaFicha({})}
+      </div>
+
+      <div class="titulo-grupo">Observações</div>
+      <div class="grade">
+        <div class="full">
           <textarea class="entrada" id="fObs" placeholder="Anotações internas do RH">${esc(f.observacoes)}</textarea></div>
       </div>
     </div>
-    <div class="modal-pe">
+    <div class="modal-pe" style="flex-wrap:wrap">
       ${id && podeAprovar() ? '<button class="btn perigo" id="fExcluir" style="margin-right:auto">Excluir funcionário</button>':''}
+      ${id && podeAprovar() ? `
+      <button class="btn sec" id="fFicha" disabled
+        title="Gera a ficha de cadastro em PDF com os dados desta tela">Exportar Ficha de Cadastro</button>
+      <button class="btn sec" id="fLgpd" disabled
+        title="Gera o termo de consentimento LGPD preenchido com os dados deste funcionário">Exportar Termo LGPD</button>`:''}
       <button class="btn sec" id="fCancelar">Cancelar</button>
       <button class="btn" id="fSalvar">Salvar</button>
     </div>`);
@@ -2212,6 +2676,39 @@ function abrirFuncionario(id, extra){
   };
   el.querySelector('#fFilial').addEventListener('change', mostrarCnpj);
   mostrarCnpj();
+  /* a ficha completa vem do servidor, só agora que a tela de edição abriu */
+  carregarFicha(el, id);
+
+  /* A exportação usa o que está na tela, inclusive o que acabou de ser
+     digitado e ainda não foi salvo — é o que a pessoa está vendo. */
+  const dadosDaTela = ()=> Object.assign({}, f, {
+      nome: el.querySelector('#fNome').value.trim().toUpperCase(),
+      filial: el.querySelector('#fFilial').value,
+      cargo: el.querySelector('#fCargo').value.trim(),
+      dataAdmissao: el.querySelector('#fAdm').value,
+      dataInicio: el.querySelector('#fIni').value,
+      status: el.querySelector('#fStatus').value,
+      dataDemissao: el.querySelector('#fStatus').value==='DEMITIDO'
+        ? el.querySelector('#fDem').value : '',
+      cpf: el.querySelector('#fCpf').value.trim(),
+      banco: el.querySelector('#fBanco').value.trim(),
+      agencia: el.querySelector('#fAgencia').value.trim(),
+      conta: el.querySelector('#fConta').value.trim(),
+      tipoConta: el.querySelector('#fTipoConta').value,
+      recebeVale: el.querySelector('#fVale').value
+    });
+  const fichaDaTela = ()=>{
+    const dados = {};
+    CAMPOS_FICHA.forEach(c=>{
+      const i = el.querySelector('#fi_'+c);
+      if(i) dados[c] = i.value.trim();
+    });
+    return dados;
+  };
+  const bFicha = el.querySelector('#fFicha');
+  if(bFicha) bFicha.onclick = ()=> exportarFichaCadastro(dadosDaTela(), fichaDaTela());
+  const bLgpd = el.querySelector('#fLgpd');
+  if(bLgpd) bLgpd.onclick = ()=> exportarTermoLGPD(dadosDaTela(), fichaDaTela());
 
   const mostrarGrupo = ()=>{
     const escolhido = el.querySelector('#fGrupo').value;
@@ -2255,6 +2752,14 @@ function abrirFuncionario(id, extra){
       dataDemissao: st.value==='DEMITIDO' ? el.querySelector('#fDem').value : '',
       observacoes: el.querySelector('#fObs').value
     };
+    /* a ficha completa só vai junto depois de ter sido carregada: salvar o
+       cadastro com os campos ainda vazios apagaria o que já estava lá */
+    if(el._fichaPronta){
+      CAMPOS_FICHA.forEach(c=>{
+        const i = el.querySelector('#fi_'+c);
+        if(i) dados[c] = i.value.trim();
+      });
+    }
     if(!dados.nome || !dados.filial){
       el.querySelector('#fErro').innerHTML = '<div class="aviso erro">Informe o nome completo e a filial.</div>'; return;
     }
@@ -2267,7 +2772,11 @@ function abrirFuncionario(id, extra){
       el.remove();
       /* o servidor já confirmou: atualiza a tela com o que foi salvo, em vez de
          baixar a base inteira de novo só para ver a mesma informação */
-      const salvo = Object.assign({}, f, dados, {id: r.id});
+      /* a lista em memória é a mesma que o servidor devolve: a ficha completa
+         não entra nela, para não andar junto em nenhuma outra tela */
+      const paraLista = Object.assign({}, dados);
+      CAMPOS_FICHA.forEach(c=> delete paraLista[c]);
+      const salvo = Object.assign({}, f, paraLista, {id: r.id});
       const i = S.funcionarios.findIndex(x=>x.id===r.id);
       if(i>=0) S.funcionarios[i] = salvo; else S.funcionarios.push(salvo);
       S.destacar = r.id;
@@ -2360,6 +2869,15 @@ function desenharDocs(el){
   const outros = S.docsLista.filter(d=>d.competencia!==comp)
     .sort((a,b)=> b.competencia.localeCompare(a.competencia));
 
+  /* Atalho para marcar um grupo inteiro — obrigatórios, opcionais ou um mês
+     anterior — sem ter de clicar cartão por cartão antes de exportar. */
+  const marcarGrupo = ids => ids.length
+    ? `<button class="link-acao marcar-grupo" data-ids="${ids.join(',')}"
+         style="margin-left:10px">${ids.every(i=>S.selecao.has(i))
+         ? 'Desmarcar' : 'Marcar todos'}</button>`
+    : '';
+  const idsDe = lista => lista.map(d=>d.id);
+
   let html = `
     <div class="docs-cabecalho">
       <div>
@@ -2376,7 +2894,8 @@ function desenharDocs(el){
     </div>
     <div class="colunas-docs">
     <div>
-    <div class="titulo-grupo" style="margin-top:0">Obrigatórios do mês</div>
+    <div class="titulo-grupo" style="margin-top:0">Obrigatórios do mês${
+      marcarGrupo(idsDe(doMes.filter(d=>tipos.includes(d.tipo))))}</div>
     <div class="grade-docs">`;
 
   tipos.forEach(t=>{
@@ -2385,7 +2904,8 @@ function desenharDocs(el){
   html += `</div></div>`;
 
   html += `<div>
-    <div class="titulo-grupo" style="margin-top:0">Opcionais<small>fora da cor do nome</small></div>
+    <div class="titulo-grupo" style="margin-top:0">Opcionais<small>fora da cor do nome</small>${
+      marcarGrupo(idsDe(doMes.filter(d=>!tipos.includes(d.tipo))))}</div>
     <div class="grade-docs">`;
   opcionais.forEach(t=>{
     html += cardDoc(t, doMes.filter(d=>d.tipo===t), f, true);
@@ -2414,7 +2934,8 @@ function desenharDocs(el){
       const doMesX = outros.filter(d=>d.competencia===m);
       const tiposX = [...new Set(doMesX.map(d=>d.tipo))]
         .sort((a,b)=> tipos.indexOf(a) - tipos.indexOf(b) || a.localeCompare(b,'pt-BR'));
-      html += `<div class="titulo-grupo mono" style="color:var(--tinta)">${compBonita(m)}</div>
+      html += `<div class="titulo-grupo mono" style="color:var(--tinta)">${compBonita(m)}${
+        marcarGrupo(idsDe(doMesX))}</div>
         <div class="grade-docs">`;
       tiposX.forEach(t=>{
         html += cardDoc(t, doMesX.filter(d=>d.tipo===t), f, !tipos.includes(t), m);
@@ -2425,6 +2946,15 @@ function desenharDocs(el){
   }
 
   el.querySelector('#docsCorpo').innerHTML = html;
+  /* o botão do rodapé diz quantos estão marcados: sem isso ninguém sabe se
+     o clique na caixinha valeu */
+  const bSel = el.querySelector('#expSel');
+  if(bSel){
+    const n = S.docsLista.filter(d=>S.selecao.has(d.id)).length;
+    bSel.textContent = n ? 'Exportar '+n+(n===1?' selecionado':' selecionados')+' em PDF'
+                         : 'Exportar selecionados em PDF';
+    bSel.disabled = !n;
+  }
   ligarEventosDocs(el);
 }
 
@@ -2487,8 +3017,21 @@ function cardDoc(tipo, docs, f, opcional, outroMes){
 }
 
 function ligarEventosDocs(el){
-  el.querySelectorAll('.chk').forEach(c=>{
-    c.onclick = ev=>{ ev.stopPropagation(); c.checked ? S.selecao.add(c.dataset.id) : S.selecao.delete(c.dataset.id); };
+  /* Um cartão pode ter vários arquivos — frente e verso, páginas soltas — e
+     por isso a caixa guarda a lista de ids. Marcar o cartão marca todos. */
+  el.querySelectorAll('.chk').forEach(c=> c.onclick = ev=>{
+    ev.stopPropagation();
+    const ids = String(c.dataset.ids||'').split(',').filter(Boolean);
+    ids.forEach(id=> c.checked ? S.selecao.add(id) : S.selecao.delete(id));
+    desenharDocs(el);
+  });
+  /* marcar/desmarcar um grupo inteiro de uma vez */
+  el.querySelectorAll('.marcar-grupo').forEach(b=> b.onclick = ev=>{
+    ev.stopPropagation();
+    const ids = String(b.dataset.ids||'').split(',').filter(Boolean);
+    const todos = ids.every(id=>S.selecao.has(id));
+    ids.forEach(id=> todos ? S.selecao.delete(id) : S.selecao.add(id));
+    desenharDocs(el);
   });
   el.querySelectorAll('[data-ver]').forEach(b=> b.onclick = e=>{
     if(e.target.classList.contains('chk')) return;
