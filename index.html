@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.14e';
+  const VERSAO_APP = '2026.10.15b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -604,6 +604,7 @@ select.g-campo.sem{color:var(--ambar)}
 .tab-cont td.col-auto{background:#fafcfb}
 .tab-cont tfoot td{background:#f6f7f9;border-top:1px solid var(--linha-forte);padding:9px 6px}
 .cel-cont{padding:5px 7px;font-size:13px;width:100%;min-width:82px}
+.cel-cont.datas{min-width:130px;font-size:12px}
 .cel-cont.dinheiro,.cel-cont.hora,.cel-cont.numero{
   font-family:'JetBrains Mono',monospace;text-align:right;
 }
@@ -649,8 +650,46 @@ select.g-campo.sem{color:var(--ambar)}
 .tab-unida thead tr.grupo-col th.col-fixa{z-index:6}
 .tab-unida tfoot td{position:sticky;bottom:0;z-index:3}
 .tab-unida tfoot td.col-fixa{z-index:5}
-.tab-unida .cel-folha{min-width:78px}
-.tab-unida .t-total{min-width:84px;text-align:right}
+.tab-vtvr{min-width:960px}
+.tab-vtvr .cel-vv{padding:5px 7px;font-size:13px;width:100%;min-width:78px}
+.tab-vtvr .cel-vv.dinheiro,.tab-vtvr .cel-vv.numero{
+  font-family:'JetBrains Mono',monospace;text-align:right;
+}
+.tab-vtvr .cel-vv:focus{background:#fffdf5}
+.tab-vtvr .cel-vv.herdado{color:var(--apagado);font-style:italic}
+.tab-vtvr .t-total{min-width:92px;text-align:right}
+.tab-unida .cel-folha{min-width:62px}
+.tab-unida .t-total{min-width:68px;text-align:right}
+
+/* ------------------------------------------------------------------
+   FOLHA EM TELA CHEIA
+   São 23 colunas. Com a página limitada a 1360px, metade da tabela
+   ficava fora da tela e preencher virava um vaivém de barra de
+   rolagem. Nesta aba a página ocupa a janela inteira e a tabela tem
+   um zoom próprio, que já abre no tamanho que faz tudo caber.
+   ------------------------------------------------------------------ */
+body.tela-larga .topo,
+body.tela-larga .abas,
+body.tela-larga main{max-width:none}
+body.tela-larga main{padding:14px 16px}
+body.tela-larga .tab-unida{font-size:12px}
+body.tela-larga .tab-unida td{padding:3px 4px}
+body.tela-larga .tab-unida th{padding:6px 4px;white-space:normal;line-height:1.15}
+body.tela-larga .tab-unida thead tr:nth-child(2) th{max-width:86px}
+body.tela-larga .tab-unida .col-fixa{white-space:nowrap}
+body.tela-larga .tab-unida .entrada{padding:4px 5px;font-size:12px}
+body.tela-larga .tab-unida .col-fixa{min-width:176px}
+#folhaRolagem{transform-origin:top left}
+.zoom-folha{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.zoom-folha button{
+  width:28px;height:28px;border:1px solid var(--linha);border-radius:2px;
+  background:var(--cartao);font-size:15px;line-height:1;color:var(--grafite);
+}
+.zoom-folha button:hover{background:var(--papel)}
+.zoom-folha .valor{
+  font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--apagado);
+  min-width:40px;text-align:center;
+}
 
 /* ---------- ANEXAR DOCUMENTOS ---------- */
 .linha-anexo{
@@ -1063,7 +1102,7 @@ const S = {
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
-  folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'' },
+  folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'', zoom:null },
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] },
   avisos:[]
@@ -1078,6 +1117,7 @@ const ROTULO_ABA = {
   COMISSOES:'Comissões',
   QUEBRAS:'Quebras',
   FOLHA:'Folha de pagamento',
+  VT_VR:'VT/VR',
   AVISO_PREVIO:'Aviso prévio'
 };
 
@@ -1627,6 +1667,9 @@ function desenhar(){
      de telefone, de uma coluna só. As outras abas, se tiver, seguem como
      estão — já encolhem sozinhas no telefone. */
   document.body.classList.toggle('celular', interfaceCelular());
+  /* a folha tem 23 colunas: nela a página usa a janela toda */
+  document.body.classList.toggle('tela-larga',
+    (S.aba === 'FOLHA' || S.aba === 'VT_VR') && !interfaceCelular());
   document.body.classList.toggle('uma-aba',
     interfaceCelular() && S.sessao.abas.filter(a=>a!=='ADMIN').length <= 1);
   if(interfaceCelular() && S.aba==='ANEXAR'){
@@ -1646,6 +1689,7 @@ function desenhar(){
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
+  else if(S.aba==='VT_VR') c.innerHTML = telaVtVr();
   else if(S.aba==='AVISO_PREVIO') c.innerHTML = telaAvisoPrevio();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
@@ -1653,6 +1697,7 @@ function desenhar(){
   if(S.aba==='COMISSOES') ligarComissoes();
   if(S.aba==='QUEBRAS') ligarQuebras();
   if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
+  if(S.aba==='VT_VR') ligarVtVr();
   if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
 
   /* A janela vem antes: ajustarRolagem mede a altura da tabela a partir da
@@ -3787,7 +3832,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','AVISO_PREVIO'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -4672,6 +4717,184 @@ function funcionariosDaFolha(){
    de vale/VT/VR e os lançamentos da contabilidade lado a lado. São dois
    registros diferentes no banco (FOLHA e CONTABILIDADE) e continuam sendo
    gravados separadamente — o que mudou é que se preenche tudo de uma vez. */
+/* ==================================================================
+   ABA VT/VR
+   Uma linha por funcionário: valor do VT, dias e total; valor do VR,
+   dias e total. É a mesma informação que aparece na folha — quem
+   mexe aqui mexe lá —, só que numa tela larga, feita para preencher
+   rápido. Digitar os dias do VT já preenche os dias do VR, que é o
+   caso de quase todo mundo; quem precisar, muda só o do VR depois.
+   ================================================================== */
+function diasVrDe(f){
+  const l = S.folha.linhas[f.id] || {};
+  /* em branco: o VR acompanha os dias do VT */
+  return (l.diasVr !== undefined && l.diasVr !== '') ? l.diasVr : (l.dias || '');
+}
+
+function totalVrDe(f){
+  const d = linhaFolhaDe(f);
+  return d.vrMes ? valorNum(d.vrDiario) : valorNum(d.vrDiario) * valorNum(diasVrDe(f));
+}
+
+function telaVtVr(){
+  if(S.folha.competencia !== S.competencia){
+    carregarFolha();
+    return `<div class="filial"><div class="vazio">Carregando VT e VR de ${
+      compBonita(S.competencia)}…</div></div>`;
+  }
+  const lista = funcionariosDaFolha();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+      S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <div style="display:flex;gap:6px;align-items:flex-end">
+      <div><label class="campo-lbl" for="vvDias">Dias para todos</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="vvDias"
+               style="width:80px"></div>
+      <button class="btn sec" id="vvAplicar">Preencher</button>
+    </div>
+    <button class="btn sec" id="vvExcel">Excel</button>
+    <button class="btn" id="vvSalvar">Salvar</button>
+  </div>
+  <div class="aviso info">
+    VT e VR de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários.
+    Os dias do VT já preenchem os do VR — mude o do VR só quando for diferente.
+    É a mesma informação da aba Folha de pagamento.
+  </div>`;
+
+  if(!lista.length) return html + vazio('Nenhum funcionário ativo',
+    'Ajuste a busca ou o filtro de filial.');
+
+  html += `<div class="painel" style="padding:0">
+    <div class="previa rolagem-alta" style="border:none">
+    <table class="tab-cont tab-vtvr"><thead>
+      <tr class="grupo-col">
+        <th class="col-fixa"></th><th></th>
+        <th colspan="3" class="g-folha">VALE TRANSPORTE</th>
+        <th colspan="3" class="g-cont">VALE REFEIÇÃO</th>
+      </tr>
+      <tr>
+        <th class="col-fixa">Funcionário</th><th>Filial</th>
+        <th>Valor do VT</th><th>Dias</th><th>Total VT</th>
+        <th>Valor do VR</th><th>Dias</th><th>Total VR</th>
+      </tr></thead><tbody>`;
+
+  lista.forEach(f=>{
+    const d = linhaFolhaDe(f);
+    html += `<tr>
+      <td class="col-fixa"><b>${esc(f.nome)}</b></td>
+      <td style="color:var(--apagado)">${esc(f.filial||'—')}</td>
+      <td><input class="entrada cel-vv dinheiro ${d.vtHerdado?'herdado':''}"
+                 data-vv="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
+                 title="${d.vtMes?'valor fechado do mês':'valor por dia'}">
+          ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
+      <td><input class="entrada cel-vv numero" data-vv="${f.id}" data-campo="dias"
+                 value="${esc(d.dias)}"></td>
+      <td class="mono t-total" data-total-vt="${f.id}">${moeda(d.totalVt)}</td>
+      <td><input class="entrada cel-vv dinheiro ${d.vrHerdado?'herdado':''}"
+                 data-vv="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
+                 title="${d.vrMes?'valor fechado do mês':'valor por dia'}">
+          ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
+      <td><input class="entrada cel-vv numero" data-vv="${f.id}" data-campo="diasVr"
+                 value="${esc(diasVrDe(f))}"></td>
+      <td class="mono t-total" data-total-vr="${f.id}">${moeda(totalVrDe(f))}</td>
+    </tr>`;
+  });
+
+  html += `</tbody><tfoot><tr>
+      <td class="col-fixa"><b>TOTAL</b></td><td></td>
+      <td></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)}</b></td>
+      <td class="mono" id="vvTotalVt"><b>${
+        moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
+      <td></td>
+      <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(diasVrDe(f)),0)}</b></td>
+      <td class="mono" id="vvTotalVr"><b>${
+        moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))}</b></td>
+    </tr></tfoot></table></div></div>`;
+  return html;
+}
+
+function atualizarTotaisVtVr(){
+  const lista = funcionariosDaFolha();
+  lista.forEach(f=>{
+    const d = linhaFolhaDe(f);
+    const a = document.querySelector(`[data-total-vt="${f.id}"]`);
+    const b = document.querySelector(`[data-total-vr="${f.id}"]`);
+    if(a) a.textContent = moeda(d.totalVt);
+    if(b) b.textContent = moeda(totalVrDe(f));
+  });
+  const tvt = document.getElementById('vvTotalVt');
+  const tvr = document.getElementById('vvTotalVr');
+  if(tvt) tvt.innerHTML = '<b>'+moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))+'</b>';
+  if(tvr) tvr.innerHTML = '<b>'+moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))+'</b>';
+}
+
+function ligarVtVr(){
+  document.querySelectorAll('.cel-vv').forEach(c=>{
+    c.oninput = ()=>{
+      const id = c.dataset.vv;
+      const l = S.folha.linhas[id] || (S.folha.linhas[id] = {funcionarioId:id});
+      l[c.dataset.campo] = c.value;
+      /* os dias do VT puxam os do VR enquanto ninguém mexeu no do VR */
+      if(c.dataset.campo === 'dias'){
+        const vr = document.querySelector(`[data-vv="${id}"][data-campo="diasVr"]`);
+        if(vr && !vr.dataset.proprio){ vr.value = c.value; l.diasVr = c.value; }
+      }
+      if(c.dataset.campo === 'diasVr') c.dataset.proprio = '1';
+      atualizarTotaisVtVr();
+    };
+    c.onblur = ()=>{ if(c.classList.contains('dinheiro') && c.value.trim()){
+      c.value = moeda(valorNum(c.value));
+      S.folha.linhas[c.dataset.vv][c.dataset.campo] = c.value;
+      atualizarTotaisVtVr();
+    }};
+  });
+  const b = id => document.getElementById(id);
+  if(b('vvAplicar')) b('vvAplicar').onclick = ()=>{
+    const n = b('vvDias').value.trim();
+    if(!n) return toast('Escreva quantos dias.', true);
+    funcionariosDaFolha().forEach(f=>{
+      const l = S.folha.linhas[f.id] || (S.folha.linhas[f.id] = {funcionarioId:f.id});
+      l.dias = n; l.diasVr = n;
+    });
+    desenhar();
+    toast(n + ' dias preenchidos para todos. Confira e clique em Salvar.');
+  };
+  if(b('vvSalvar')) b('vvSalvar').onclick = ()=>salvarFolha();
+  if(b('vvExcel')) b('vvExcel').onclick = exportarVtVrExcel;
+}
+
+async function exportarVtVrExcel(){
+  await usar('xlsx');
+  const lista = funcionariosDaFolha();
+  const dados = [['FUNCIONÁRIO','FILIAL','VALOR DO VT','DIAS VT','TOTAL VT',
+    'VALOR DO VR','DIAS VR','TOTAL VR']]
+    .concat(lista.map(f=>{
+      const d = linhaFolhaDe(f);
+      return [f.nome, f.filial||'', d.vtDiario, d.dias, moeda(d.totalVt),
+              d.vrDiario, diasVrDe(f), moeda(totalVrDe(f))];
+    }))
+    .concat([['TOTAL','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
+      moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
+      String(lista.reduce((s,f)=>s+valorNum(diasVrDe(f)),0)),
+      moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))]]);
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:14},{wch:14},{wch:10},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'VT VR');
+  XLSX.writeFile(wb, 'VT E VR '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
+}
+
 function telaFolha(){
   if(S.folha.competencia !== S.competencia){
     carregarFolha();
@@ -4703,6 +4926,13 @@ function telaFolha(){
                value="${esc(S.folha.diasShop||'')}" style="width:72px"></div>
       <button class="btn sec" id="folhaAplicar">Preencher dias</button>
     </div>
+    <div class="zoom-folha" title="Diminui ou aumenta a tabela para caber na tela">
+      <button id="zoomMenos" aria-label="Diminuir">−</button>
+      <span class="valor" id="zoomValor">100%</span>
+      <button id="zoomMais" aria-label="Aumentar">+</button>
+      <button id="zoomAjustar" style="width:auto;padding:0 8px;font-size:11px"
+              title="Ajusta para a tabela inteira caber na largura da tela">Caber</button>
+    </div>
     <button class="btn sec" id="contPuxar">Puxar horas extras</button>
     <button class="btn sec" id="folhaExcel">Excel</button>
     <button class="btn sec" id="folhaPdf">PDF folha</button>
@@ -4731,14 +4961,14 @@ function telaFolha(){
     <table class="tab-cont tab-unida"><thead>
       <tr class="grupo-col">
         <th class="col-fixa"></th><th></th>
-        <th colspan="7" class="g-folha">VALE, VT E VR</th>
+        <th colspan="6" class="g-folha">VALE, VT E VR</th>
         <th colspan="${COLS_CONT.length}" class="g-cont">CONTABILIDADE</th>
         <th></th>
       </tr>
       <tr>
         <th class="col-fixa">Funcionário</th><th>Filial</th>
         <th>VT</th><th>Dias</th><th>Total VT</th><th>VR</th><th>Total VR</th>
-        <th>Vale mensal</th><th style="min-width:92px">Quer vale?</th>
+        <th>Vale mensal</th>
         ${COLS_CONT.map(c=>`<th class="${c.puxa?'col-auto':''}">${esc(c.titulo)}</th>`).join('')}
         <th style="min-width:170px">Observações</th>
       </tr></thead><tbody>`;
@@ -4766,10 +4996,6 @@ function telaFolha(){
                  data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
                  title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
                  ${f.recebeVale==='NAO'?'disabled':''}></td>
-      <td><select class="entrada cel-vale ${f.recebeVale==='NAO'?'nao':''}" data-vale="${f.id}">
-        <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
-        <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
-      </select></td>
       ${COLS_CONT.map(c=>`<td class="${c.puxa?'col-auto':''}">
         <input class="entrada cel-cont ${c.tipo}" data-f="${f.id}" data-campo="${c.campo}"
                value="${esc(l[c.campo]||'')}"
@@ -4790,12 +5016,8 @@ function telaFolha(){
       <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
       <td class="mono"><b>${moeda(lista.reduce((s,f)=>
         s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
-      <td class="mono" style="text-align:center;color:var(--apagado)">${
-        lista.filter(f=>f.recebeVale==='NAO').length} sem</td>
       ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
-        c.tipo==='hora' ? somaHoras(soma(c.campo))
-        : c.tipo==='numero' ? String(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
-        : moeda(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+        totalDaColuna(c, soma(c.campo))
       }</b></td>`).join('')}
       <td></td>
     </tr></tfoot></table></div>
@@ -4891,7 +5113,66 @@ async function carregarFolha(){
   finally{ carregando(false); delete emVoo['carregarFolha']; }
 }
 
+/* ------------------------------------------------------------------
+   ZOOM DA FOLHA
+   O zoom do CSS encolhe a tabela de verdade — inclusive os campos de
+   digitação e o cabeçalho congelado —, ao contrário de um transform,
+   que quebraria a rolagem. Ao abrir a aba o sistema já escolhe o
+   tamanho em que a tabela inteira cabe, e a pessoa ajusta se quiser.
+   ------------------------------------------------------------------ */
+const ZOOMS = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 1];
+
+function aplicarZoomFolha(){
+  const cx = document.getElementById('folhaRolagem');
+  if(!cx) return;
+  cx.style.zoom = S.folha.zoom || 1;
+  const v = document.getElementById('zoomValor');
+  if(v) v.textContent = Math.round((S.folha.zoom || 1) * 100) + '%';
+}
+
+/* o maior zoom em que a tabela inteira cabe na largura disponível */
+function zoomQueCabe(){
+  const cx = document.getElementById('folhaRolagem');
+  const tab = cx && cx.querySelector('table');
+  if(!tab) return 1;
+  const antes = cx.style.zoom;
+  cx.style.zoom = 1;
+  const precisa = tab.scrollWidth, tem = cx.clientWidth;
+  cx.style.zoom = antes;
+  if(!precisa || !tem || precisa <= tem) return 1;
+  /* para baixo, nunca para cima: arredondar para cima deixaria sobrando
+     justamente a última coluna. Abaixo de 60% a letra fica pequena
+     demais para conferir dinheiro, então aí volta a rolar. */
+  /* dois pixels de folga: sem eles o arredondamento do navegador ainda
+     deixa uma listra de rolagem na direita */
+  return Math.max(0.6, Math.floor(((tem - 2) / precisa) * 100) / 100);
+}
+
+function ligarZoomFolha(){
+  const b = id => document.getElementById(id);
+  if(!b('zoomValor')) return;
+  /* na primeira vez que a aba abre, já entra no tamanho que cabe */
+  if(S.folha.zoom == null) S.folha.zoom = zoomQueCabe();
+  aplicarZoomFolha();
+  const mover = passo => {
+    const atual = S.folha.zoom || 1;
+    const proximo = passo > 0 ? ZOOMS.find(z => z > atual + 0.001)
+                              : ZOOMS.slice().reverse().find(z => z < atual - 0.001);
+    S.folha.zoom = proximo || (passo > 0 ? ZOOMS[ZOOMS.length-1] : ZOOMS[0]);
+    aplicarZoomFolha();
+  };
+  if(b('zoomMenos')) b('zoomMenos').onclick = ()=>mover(-1);
+  if(b('zoomMais'))  b('zoomMais').onclick  = ()=>mover(1);
+  if(b('zoomAjustar')) b('zoomAjustar').onclick = ()=>{
+    S.folha.zoom = zoomQueCabe();
+    aplicarZoomFolha();
+    toast(S.folha.zoom === 1 ? 'A tabela já cabe inteira na tela.'
+      : 'Tabela em ' + Math.round(S.folha.zoom*100) + '% — cabe inteira agora.');
+  };
+}
+
 function ligarFolha(){
+  ligarZoomFolha();
   document.querySelectorAll('.cel-folha').forEach(c=>{
     c.oninput = ()=>{
       const l = S.folha.linhas[c.dataset.f] || (S.folha.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
@@ -5124,10 +5405,12 @@ async function salvarFolha(silencioso){
     return {
       funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
       vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
-      vrDiario:d.vrDiario, totalVr:moeda(d.totalVr),
+      vrDiario:d.vrDiario, totalVr:moeda(totalVrDe(f)),
+      /* dias do VR só são gravados quando diferem dos do VT */
+      diasVr: (l.diasVr && l.diasVr !== d.dias) ? l.diasVr : '',
       vale: f.recebeVale==='NAO' ? '' : d.vale, observacoes:d.observacoes,
       /* mexer só no VT ou no VR, sem tocar nos dias, também é um lançamento */
-      _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario)
+      _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario || l.diasVr)
     };
   }).filter(it=> it._mexido || it.dias || it.vale || it.observacoes)
     .map(it=>{ delete it._mexido; return it; });
@@ -5213,9 +5496,7 @@ function tabelaFolhaUnida(){
     moeda(lista.reduce((s,f)=> s + (f.recebeVale==='NAO'?0:valorNum(linhaFolhaDe(f).vale)),0)), '']
     .concat(COLS_CONT.map(c=>{
       const vals = lista.map(f=>(S.cont.linhas[f.id]||{})[c.campo]);
-      return c.tipo==='hora' ? somaHoras(vals)
-           : c.tipo==='numero' ? String(vals.reduce((s,v)=>s+valorNum(v),0))
-           : moeda(vals.reduce((s,v)=>s+valorNum(v),0));
+      return totalDaColuna(c, vals);
     })).concat(['']);
   return {cab, linhas, total};
 }
@@ -5335,19 +5616,55 @@ async function exportarFolhaPdf(){
    (do que está na tela ou do que já foi salvo); o resto é digitado.
    ================================================================== */
 const COLS_CONT = [
-  {campo:'vale',       titulo:'VALE',              tipo:'dinheiro'},
   {campo:'he50',       titulo:'H. EXTRAS 50%',     tipo:'hora',    puxa:true},
   {campo:'he100',      titulo:'H. EXTRAS 100%',    tipo:'hora',    puxa:true},
   {campo:'adNoturno',  titulo:'AD. NOTURNO',       tipo:'hora',    puxa:true},
-  {campo:'faltas',     titulo:'FALTAS',            tipo:'numero',  puxa:true},
+  /* não é a quantidade de faltas: são as datas em que faltou, uma do lado
+     da outra. Quando vem do cartão ponto, o sistema já escreve os dias. */
+  {campo:'faltas',     titulo:'FALTAS',            tipo:'datas',   puxa:true},
   {campo:'atrasos',    titulo:'ATRASOS',           tipo:'hora',    puxa:true},
-  {campo:'comissoes',  titulo:'COMISSÕES',         tipo:'dinheiro',puxa:true},
+  /* a antiga coluna COMISSÕES virou PREMIAÇÃO: é o mesmo valor, que vem
+     das metas batidas na aba Comissões */
+  {campo:'comissoes',  titulo:'PREMIAÇÃO',         tipo:'dinheiro',puxa:true},
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
   {campo:'vt',         titulo:'VT MÊS ATUAL',      tipo:'dinheiro'},
-  {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro',puxa:true},
-  {campo:'premiacao',  titulo:'PREMIAÇÃO',         tipo:'dinheiro'}
+  {campo:'quebra',     titulo:'QUEBRA DE PRODUTOS',tipo:'dinheiro',puxa:true}
 ];
+
+/* O total de cada coluna de lançamento. Datas não somam: o que interessa
+   no rodapé é quantas pessoas faltaram e quantos dias ao todo. */
+function totalDaColuna(c, valores){
+  if(c.tipo === 'hora') return somaHoras(valores);
+  if(c.tipo === 'numero') return String(valores.reduce((s,v)=>s+valorNum(v),0));
+  if(c.tipo === 'datas'){
+    const comFalta = valores.filter(v=>String(v||'').trim());
+    const dias = comFalta.reduce((s,v)=>s+diasDaLista(v).length, 0);
+    return comFalta.length ? dias + (dias===1?' dia':' dias') + ' · ' +
+      comFalta.length + (comFalta.length===1?' pessoa':' pessoas') : '';
+  }
+  return moeda(valores.reduce((s,v)=>s+valorNum(v),0));
+}
+
+/* As datas de falta vêm separadas por vírgula, ponto e vírgula ou espaço.
+   Aceita 03/09, 03/09/2026 ou só o dia (3), que vira dia da competência. */
+function diasDaLista(texto){
+  return String(texto||'').split(/[,;]+|\s+/).map(x=>x.trim()).filter(Boolean);
+}
+
+/* Normaliza o que a pessoa digitou: "3 5 12" vira "03/09, 05/09, 12/09". */
+function arrumarDatasFalta(texto, comp){
+  const mes = comp ? comp.substring(5,7) : '';
+  const vistos = new Set();
+  return diasDaLista(texto).map(p=>{
+    const m = p.match(/^(\d{1,2})(?:\/(\d{1,2}))?(?:\/(\d{2,4}))?$/);
+    if(!m) return p;
+    const dia = String(+m[1]).padStart(2,'0');
+    const mm = m[2] ? String(+m[2]).padStart(2,'0') : mes;
+    return mm ? dia+'/'+mm : dia;
+  }).filter(x=>{ if(vistos.has(x)) return false; vistos.add(x); return true; })
+    .join(', ');
+}
 
 function valorNum(v){
   const t = String(v==null?'':v).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.');
@@ -5370,7 +5687,10 @@ function apuracaoDe(f){
     (r.funcionarioId && r.funcionarioId===f.id) || normalizar(r.nome)===normalizar(f.nome));
   if(vivo) return Object.assign({
     he50: minParaHora(vivo.ap.he50), he100: minParaHora(vivo.ap.he100),
-    adNoturno: minParaHora(vivo.ap.noturno), faltas: String(vivo.ap.diasFalta),
+    adNoturno: minParaHora(vivo.ap.noturno),
+    /* as datas dos dias marcados como falta no cartão, uma ao lado da outra */
+    faltas: (vivo.ap.detalhe||[]).filter(d=>d.tipo==='FALTA')
+              .map(d=>String(d.data).substring(0,5)).join(', '),
     atrasos: minParaHora(vivo.ap.atrasos), origem:'tela'
   }, comissaoDe(f));
   const salva = (S.cont.apuracoes||[]).find(a=>
@@ -5461,9 +5781,7 @@ function telaContabilidade(){
   html += `</tbody><tfoot><tr>
       <td class="col-fixa"><b>TOTAL</b></td><td></td>
       ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
-        c.tipo==='hora' ? somaHoras(soma(c.campo))
-        : c.tipo==='numero' ? String(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
-        : moeda(soma(c.campo).reduce((s,v)=>s+valorNum(v),0))
+        totalDaColuna(c, soma(c.campo))
       }</b></td>`).join('')}
       <td></td>
     </tr></tfoot></table></div></div>`;
@@ -5505,11 +5823,18 @@ function ligarContabilidade(){
       const l = S.cont.linhas[c.dataset.f] || (S.cont.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
       l[c.dataset.campo] = c.value;
     };
-    c.onblur = ()=>{ if(c.classList.contains('dinheiro') && c.value.trim()){
-      c.value = moeda(valorNum(c.value));
-      S.cont.linhas[c.dataset.f][c.dataset.campo] = c.value;
-      desenhar();
-    }};
+    c.onblur = ()=>{
+      if(c.classList.contains('dinheiro') && c.value.trim()){
+        c.value = moeda(valorNum(c.value));
+        S.cont.linhas[c.dataset.f][c.dataset.campo] = c.value;
+        desenhar();
+      }
+      /* datas de falta: "3 5 12" sai de lá como "03/10, 05/10, 12/10" */
+      if(c.classList.contains('datas') && c.value.trim()){
+        c.value = arrumarDatasFalta(c.value, S.competencia);
+        S.cont.linhas[c.dataset.f][c.dataset.campo] = c.value;
+      }
+    };
   });
   const b = id => document.getElementById(id);
   if(b('contPuxar')) b('contPuxar').onclick = puxarHorasExtras;
@@ -5594,9 +5919,7 @@ function tabelaCont(){
   });
   const total = ['TOTAL',''].concat(COLS_CONT.map(c=>{
     const vals = lista.map(f=>(S.cont.linhas[f.id]||{})[c.campo]);
-    return c.tipo==='hora' ? somaHoras(vals)
-         : c.tipo==='numero' ? String(vals.reduce((s,v)=>s+valorNum(v),0))
-         : moeda(vals.reduce((s,v)=>s+valorNum(v),0));
+    return totalDaColuna(c, vals);
   })).concat(['']);
   return {cab, linhas, total};
 }
