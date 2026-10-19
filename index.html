@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.15b';
+  const VERSAO_APP = '2026.10.19';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -176,6 +176,10 @@ select.campo,input.campo{
 .btn.perigo{background:var(--vermelho)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.mini{padding:6px 10px;font-size:12px}
+/* O botão de exportar o vale fica embaixo do seletor de filial, não ao lado:
+   ele age sobre a filial escolhida, e junto dela isso fica à vista. */
+.coluna-filtro{display:flex;flex-direction:column;gap:6px;align-self:flex-start}
+.coluna-filtro .btn.mini{width:100%}
 
 /* ---------- FILIAL ---------- */
 .filial{background:var(--cartao);border:1px solid var(--linha);border-radius:3px;margin-bottom:14px;overflow:hidden}
@@ -635,7 +639,8 @@ select.g-campo.sem{color:var(--ambar)}
 }
 
 /* tabela única da folha: duas famílias de colunas sob um cabeçalho de grupo */
-.tab-unida{min-width:2080px}
+/* a folha ficou com 14 colunas: o VT e o VR mudaram para a aba VT/VR */
+.tab-unida{min-width:1460px}
 .tab-unida thead tr.grupo-col th{
   font-size:9px;letter-spacing:.14em;padding:5px 6px;text-align:center;
   border-bottom:1px solid var(--linha);background:#f1f3f5;color:var(--apagado);
@@ -1098,7 +1103,7 @@ const S = {
           tiposOpcionais:[]},
   competencia: hojeCompetencia(),
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, excluidos:[], pendAberta:null,
-  docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{},
+  docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{}, cacheDocs:{},
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
@@ -1223,6 +1228,151 @@ function progresso(texto){
   cx.classList.add('on');
 }
 
+/* ==================================================================
+   CACHE LOCAL — a tela aparece antes da nuvem responder
+   O Apps Script leva de meio a dois segundos para responder, e não há
+   como encurtar isso: é o tempo da infraestrutura do Google. O que dá
+   para fazer é não ficar olhando para uma tela branca enquanto ele
+   pensa. A última carga fica guardada no próprio navegador; ao abrir,
+   o sistema pinta tudo na hora com ela e, em segundo plano, confere
+   com o servidor e corrige o que mudou.
+   ================================================================== */
+const CHAVE_CACHE = 'rh.carga.';
+
+/* A versão entra na chave de propósito: depois de atualizar o sistema, a carga
+   guardada pela versão anterior pode ter campo a menos e pintaria a tela
+   errada. Com a versão na chave, ela simplesmente é ignorada. */
+function chaveDaCarga(){
+  return CHAVE_CACHE + VERSAO_APP + '.' + (S.usuario||'') + '.' + S.competencia;
+}
+
+/* Guarda o essencial para desenhar a tela. Miniaturas e arquivos não
+   entram aqui — eles têm o seu próprio cache, em IndexedDB. */
+function enxugarCarga(d){
+  return {
+    sessao: d.sessao, filiais: d.filiais, usuarios: d.usuarios,
+    funcionarios: d.funcionarios, documentos: d.documentos, prazos: d.prazos,
+    calculos: d.calculos, grupos: d.grupos, avisos: d.avisos,
+    config: d.config, versao: d.versao
+  };
+}
+
+/* O texto é o que vai para o disco e também o que serve de comparação: se a
+   resposta do servidor é igual ao que já está na tela, não há nada para
+   redesenhar — e assim ninguém perde o que estava digitando. */
+function textoDaCarga(d){
+  try{ return JSON.stringify(enxugarCarga(d)); }catch(e){ return ''; }
+}
+
+let _textoCargaNaTela = '';
+let _pintadoDoCache = false;
+
+function guardarCarga(d){
+  const texto = textoDaCarga(d);
+  _textoCargaNaTela = texto;
+  try{
+    localStorage.setItem(chaveDaCarga(), texto);
+  }catch(e){
+    /* sem espaço ou modo anônimo: o sistema só fica mais lento, não quebra */
+    try{ limparCargasVelhas(true); localStorage.setItem(chaveDaCarga(), texto); }catch(e2){}
+  }
+}
+
+/* Verdadeiro quando a resposta nova não muda nada do que está desenhado. */
+function cargaIgualATela(d){
+  return !!_textoCargaNaTela && textoDaCarga(d) === _textoCargaNaTela;
+}
+
+function lerCarga(){
+  try{
+    const bruto = localStorage.getItem(chaveDaCarga());
+    if(!bruto) return null;
+    const d = JSON.parse(bruto);
+    /* carga de outra versão do sistema pode ter campo a menos: descarta */
+    if(!d || !d.sessao || !d.funcionarios || !d.config) return null;
+    _textoCargaNaTela = bruto;
+    return d;
+  }catch(e){ return null; }
+}
+
+/* Mantém só as cargas da competência atual: uma por usuário. */
+function limparCargasVelhas(tudo){
+  const manter = chaveDaCarga();
+  for(let i = localStorage.length - 1; i >= 0; i--){
+    const k = localStorage.key(i);
+    if(k && k.indexOf(CHAVE_CACHE) === 0 && (tudo || k !== manter)){
+      localStorage.removeItem(k);
+    }
+  }
+}
+
+/* ==================================================================
+   CACHE DE ARQUIVOS — abrir o mesmo documento duas vezes é instantâneo
+   O arquivo anexado nunca muda: trocar a foto cria outro documento,
+   com outro id. Então o que foi baixado uma vez pode ficar guardado
+   no navegador para sempre — e sobreviver a recarregar a página, o
+   que o cache em memória não fazia.
+   ================================================================== */
+const BD_ARQUIVOS = 'rh-arquivos';
+let _bd = null;
+
+function bancoLocal(){
+  if(_bd) return _bd;
+  _bd = new Promise((ok)=>{
+    try{
+      const p = indexedDB.open(BD_ARQUIVOS, 1);
+      p.onupgradeneeded = ()=>{
+        const b = p.result;
+        if(!b.objectStoreNames.contains('arquivos')) b.createObjectStore('arquivos');
+      };
+      p.onsuccess = ()=>ok(p.result);
+      p.onerror = ()=>ok(null);
+    }catch(e){ ok(null); }
+  });
+  return _bd;
+}
+
+function lerArquivoLocal(id){
+  return bancoLocal().then(b=> b ? new Promise(ok=>{
+    try{
+      const p = b.transaction('arquivos','readonly').objectStore('arquivos').get(id);
+      p.onsuccess = ()=>ok(p.result || null);
+      p.onerror = ()=>ok(null);
+    }catch(e){ ok(null); }
+  }) : null);
+}
+
+function guardarArquivoLocal(id, dados){
+  return bancoLocal().then(b=>{
+    if(!b) return;
+    try{
+      b.transaction('arquivos','readwrite').objectStore('arquivos')
+        .put({bytes:dados.bytes, mime:dados.mime, nome:dados.nome, em:Date.now()}, id);
+    }catch(e){}
+  });
+}
+
+/* Usado ao sair: o computador da loja é compartilhado. */
+function apagarArquivosLocais(){
+  return bancoLocal().then(b=>{
+    if(!b) return;
+    return new Promise(ok=>{
+      try{
+        const p = b.transaction('arquivos','readwrite').objectStore('arquivos').clear();
+        p.onsuccess = ()=>ok(); p.onerror = ()=>ok();
+      }catch(e){ ok(); }
+    });
+  });
+}
+
+function esquecerArquivoLocal(id){
+  return bancoLocal().then(b=>{
+    if(!b) return;
+    try{ b.transaction('arquivos','readwrite').objectStore('arquivos').delete(id); }
+    catch(e){}
+  });
+}
+
 async function api(acao, dados={}, op={}){
   if(API.indexOf('COLE_AQUI')===0){
     throw new Error('Cole a URL do Apps Script na constante API, no topo do arquivo.');
@@ -1233,8 +1383,11 @@ async function api(acao, dados={}, op={}){
   }
   const escrita = ESCRITAS.test(acao);
   chamadasAbertas++;
-  if(!op.silencioso) mostrarEstado('trabalhando', escrita ? 'Salvando…' : 'Carregando…');
-  else mostrarEstado('trabalhando','Salvando…');
+  /* Numa gravação, "silencioso" sempre mostrou que está salvando, e tem de
+     continuar mostrando: é dinheiro sendo gravado. Numa leitura, silencioso
+     quer dizer conferência em segundo plano — sem avisar nada na tela. */
+  if(escrita) mostrarEstado('trabalhando','Salvando…');
+  else if(!op.silencioso) mostrarEstado('trabalhando','Carregando…');
   const corpo = Object.assign({acao, usuario:S.usuario, senha:S.senha}, dados);
   try{
     const r = await fetch(API, {
@@ -1272,6 +1425,9 @@ async function api(acao, dados={}, op={}){
         'desatualizada: publique como nova versão e tente de novo.');
     }
     if(!j.ok) throw new Error(j.erro||'Erro no servidor.');
+    /* Anexar, aprovar ou excluir muda a pasta do funcionário: a lista guardada
+       não vale mais. Invalidar aqui, num lugar só, evita esquecer um caminho. */
+    if(/Documento/.test(acao)) S.cacheDocs = {};
     chamadasAbertas--;
     if(!chamadasAbertas && escrita){
       mostrarEstado('salvo','Salvo');
@@ -1314,23 +1470,53 @@ async function entrar(){
   S.usuario = u || 'MASTER'; S.senha = p;
   try{
     /* uma única ida ao servidor: valida a senha e já traz os dados da tela */
-    const r = await api('login', {competencia:S.competencia});
+    const r = await api('login', {competencia:S.competencia}, {silencioso:_pintadoDoCache});
     S.sessao = r.sessao;
     try{ sessionStorage.setItem('rh', JSON.stringify({u:S.usuario, s:S.senha})); }catch(e){}
-    document.getElementById('login').style.display='none';
-    document.getElementById('app').style.display='block';
-    prepararTela();
-    aplicarCarga(r);
+    /* Quando a tela já foi pintada com a carga guardada, redesenhar só faz
+       sentido se algo mudou de verdade — senão o gerente que já começou a
+       digitar perderia o que escreveu por causa de um redesenho inútil. */
+    if(_pintadoDoCache && cargaIgualATela(r)){
+      _ultimaCarga = Date.now();
+    }else{
+      document.getElementById('login').style.display='none';
+      document.getElementById('app').style.display='block';
+      prepararTela();
+      aplicarCarga(r);
+      _ultimaCarga = Date.now();
+    }
+    guardarCarga(r);
+    limparCargasVelhas();
   }catch(e){
-    erro.textContent = e.message;
-    S.usuario=''; S.senha='';
+    /* Senha errada derruba para a tela de login. Já uma queda de internet,
+       não: é melhor continuar mostrando os últimos dados do que um formulário
+       de login que não vai funcionar sem rede. */
+    const senhaErrada = /senha|usu[áa]rio/i.test(e.message || '');
+    if(_pintadoDoCache && !senhaErrada){
+      toast('Sem conexão com a nuvem. Mostrando os últimos dados carregados.', true);
+    }else{
+      if(_pintadoDoCache){
+        document.getElementById('app').style.display='none';
+        document.getElementById('login').style.display='';
+        try{ localStorage.removeItem(chaveDaCarga()); }catch(e2){}
+        try{ sessionStorage.removeItem('rh'); }catch(e2){}
+      }
+      erro.textContent = e.message;
+      S.usuario=''; S.senha='';
+    }
+    _pintadoDoCache = false;
   }finally{
     btn.disabled=false; btn.textContent='Entrar';
   }
 }
 
-document.getElementById('btnSair').onclick = ()=>{
+/* Sair apaga tudo o que ficou guardado no navegador. O computador da loja é
+   compartilhado, e nome, CPF e documento de funcionário não podem ficar no
+   disco depois que o gerente sai. */
+document.getElementById('btnSair').onclick = async ()=>{
   try{ sessionStorage.removeItem('rh'); }catch(e){}
+  try{ limparCargasVelhas(true); }catch(e){}
+  try{ await apagarArquivosLocais(); }catch(e){}
   location.reload();
 };
 
@@ -1415,7 +1601,9 @@ function aplicarCarga(d){
 async function recarregar(){
   carregando(true);
   try{
-    aplicarCarga(await api('carregar', {competencia:S.competencia}));
+    const d = await api('carregar', {competencia:S.competencia});
+    aplicarCarga(d);
+    guardarCarga(d);
     _ultimaCarga = Date.now();
   }catch(e){
     toast(e.message, true);
@@ -1436,11 +1624,14 @@ async function atualizarSilencioso(forcar){
   if(!forcar && Date.now() - _ultimaCarga < 60000) return;
   _atualizando = true;
   try{
-    const d = await api('carregar', {competencia:S.competencia});
+    const d = await api('carregar', {competencia:S.competencia}, {silencioso:true});
     if(!d || !d.sessao) return;
+    _ultimaCarga = Date.now();
+    /* nada mudou: não redesenhar, para não atropelar quem está digitando */
+    if(cargaIgualATela(d)) return;
     const antes = JSON.stringify([S.config, S.filiais.map(f=>f.nome), S.grupos]);
     aplicarCarga(d);
-    _ultimaCarga = Date.now();
+    guardarCarga(d);
     const depois = JSON.stringify([S.config, S.filiais.map(f=>f.nome), S.grupos]);
     if(antes !== depois) toast('Configurações atualizadas pelo RH.');
   }catch(e){ /* silencioso de propósito: é um reforço, não a via principal */ }
@@ -2844,10 +3035,19 @@ function abrirFuncionario(id, extra){
 async function abrirDocumentos(funcId){
   const f = S.funcionarios.find(x=>x.id===funcId);
   S.docsFunc = f; S.selecao = new Set();
-  carregando(true);
-  try{ S.docsLista = await api('listarDocumentos',{funcionarioId:funcId, competencia:S.competencia}); }
-  catch(e){ carregando(false); return toast(e.message,true); }
-  carregando(false);
+  /* Quem já abriu a pasta deste funcionário nesta sessão vê a lista na hora, e
+     o sistema confere com a nuvem em segundo plano — só redesenha se mudou. */
+  const chaveDocs = funcId + '.' + S.competencia;
+  const guardada = S.cacheDocs[chaveDocs];
+  if(guardada){
+    S.docsLista = guardada;
+  }else{
+    carregando(true);
+    try{ S.docsLista = await api('listarDocumentos',{funcionarioId:funcId, competencia:S.competencia}); }
+    catch(e){ carregando(false); return toast(e.message,true); }
+    carregando(false);
+    S.cacheDocs[chaveDocs] = S.docsLista;
+  }
 
   const el = modal(`
     <div class="modal-topo">
@@ -2865,6 +3065,33 @@ async function abrirDocumentos(funcId){
 
   el._func = f;
   desenharDocs(el);
+
+  /* Enquanto ele olha a lista, o sistema vai buscando os anexos do mês, um por
+     vez, sem pressa. Quando ele clicar, o documento já está aqui. Um por vez de
+     propósito: o Apps Script tem cota de chamadas e não gosta de rajada. */
+  (async ()=>{
+    const doMes = S.docsLista.filter(d=>d.competencia===S.competencia).slice(0,12);
+    for(const d of doMes){
+      if(!el.isConnected) return;          /* fechou a pasta: para de baixar */
+      if(S.cacheArquivo[d.id]) continue;
+      try{ await urlArquivo(d.id); }catch(e){ return; }
+    }
+  })();
+
+  /* conferência em segundo plano: a filial pode ter anexado algo agora */
+  if(guardada){
+    api('listarDocumentos', {funcionarioId:funcId, competencia:S.competencia}, {silencioso:true})
+      .then(lista=>{
+        S.cacheDocs[chaveDocs] = lista;
+        if(!el.isConnected || S.docsFunc !== f) return;
+        if(JSON.stringify(lista) === JSON.stringify(S.docsLista)) return;
+        S.docsLista = lista;
+        const b = el.querySelector('#expTudo');
+        if(b) b.textContent = 'Exportar a pasta completa' + (lista.length ? ' ('+lista.length+')' : '');
+        desenharDocs(el);
+      })
+      .catch(()=>{});
+  }
 
   const bSel = el.querySelector('#expSel');
   if(bSel) bSel.onclick = ()=>{
@@ -3124,7 +3351,7 @@ async function excluirDoc(el, id){
   carregando(true);
   try{
     await api('excluirDocumento',{id});
-    delete S.cacheArquivo[id]; S.selecao.delete(id);
+    delete S.cacheArquivo[id]; S.selecao.delete(id); esquecerArquivoLocal(id);
     S.docsLista = S.docsLista.filter(x=>x.id!==id);
     sincronizarDocs(); desenharDocs(el); desenhar();
     toast('Documento excluído.');
@@ -3442,13 +3669,24 @@ function carregarImagem(arq){
 }
 
 /* ---------- VISUALIZADOR ---------- */
+/* O arquivo anexado nunca muda: trocar a foto cria outro documento, com outro
+   id. Então o que foi baixado uma vez pode ficar guardado no navegador — e
+   sobreviver a recarregar a página, o que o cache em memória não fazia. Só sai
+   de lá quando o documento é excluído. */
 async function urlArquivo(id, paraExportar){
   if(S.cacheArquivo[id]) return S.cacheArquivo[id].url;
+  const local = await lerArquivoLocal(id);
+  if(local && local.bytes){
+    const url = URL.createObjectURL(new Blob([local.bytes], {type:local.mime}));
+    S.cacheArquivo[id] = {url, bytes:local.bytes, mime:local.mime, nome:local.nome};
+    return url;
+  }
   const a = await api('baixarArquivo', paraExportar ? {id, exportar:true} : {id});
   const bytes = b64Bytes(a.dados);
   const blob = new Blob([bytes], {type:a.mimeType});
   const url = URL.createObjectURL(blob);
   S.cacheArquivo[id] = {url, bytes, mime:a.mimeType, nome:a.nome};
+  guardarArquivoLocal(id, S.cacheArquivo[id]);
   return url;
 }
 function b64Bytes(b64){
@@ -4725,17 +4963,6 @@ function funcionariosDaFolha(){
    rápido. Digitar os dias do VT já preenche os dias do VR, que é o
    caso de quase todo mundo; quem precisar, muda só o do VR depois.
    ================================================================== */
-function diasVrDe(f){
-  const l = S.folha.linhas[f.id] || {};
-  /* em branco: o VR acompanha os dias do VT */
-  return (l.diasVr !== undefined && l.diasVr !== '') ? l.diasVr : (l.dias || '');
-}
-
-function totalVrDe(f){
-  const d = linhaFolhaDe(f);
-  return d.vrMes ? valorNum(d.vrDiario) : valorNum(d.vrDiario) * valorNum(diasVrDe(f));
-}
-
 function telaVtVr(){
   if(S.folha.competencia !== S.competencia){
     carregarFolha();
@@ -4756,18 +4983,23 @@ function telaVtVr(){
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     <div style="display:flex;gap:6px;align-items:flex-end">
-      <div><label class="campo-lbl" for="vvDias">Dias para todos</label>
+      <div><label class="campo-lbl" for="diasRua">Dias rua</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="diasRua"
+               value="${esc(S.folha.diasRua||'')}" style="width:72px"></div>
+      <div><label class="campo-lbl" for="diasShop">Dias shopping</label>
+        <input class="entrada mono" type="number" min="0" max="31" id="diasShop"
+               value="${esc(S.folha.diasShop||'')}" style="width:72px"></div>
+      <div><label class="campo-lbl" for="vvDias">Todos</label>
         <input class="entrada mono" type="number" min="0" max="31" id="vvDias"
-               style="width:80px"></div>
-      <button class="btn sec" id="vvAplicar">Preencher</button>
+               style="width:72px"></div>
+      <button class="btn sec" id="vvAplicar">Preencher dias</button>
     </div>
     <button class="btn sec" id="vvExcel">Excel</button>
     <button class="btn" id="vvSalvar">Salvar</button>
   </div>
   <div class="aviso info">
     VT e VR de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários.
-    Os dias do VT já preenchem os do VR — mude o do VR só quando for diferente.
-    É a mesma informação da aba Folha de pagamento.
+    A quantidade de dias vale para os dois: o VR usa os mesmos dias do VT.
   </div>`;
 
   if(!lista.length) return html + vazio('Nenhum funcionário ativo',
@@ -4779,12 +5011,12 @@ function telaVtVr(){
       <tr class="grupo-col">
         <th class="col-fixa"></th><th></th>
         <th colspan="3" class="g-folha">VALE TRANSPORTE</th>
-        <th colspan="3" class="g-cont">VALE REFEIÇÃO</th>
+        <th colspan="2" class="g-cont">VALE REFEIÇÃO</th>
       </tr>
       <tr>
         <th class="col-fixa">Funcionário</th><th>Filial</th>
         <th>Valor do VT</th><th>Dias</th><th>Total VT</th>
-        <th>Valor do VR</th><th>Dias</th><th>Total VR</th>
+        <th>Valor do VR</th><th>Total VR</th>
       </tr></thead><tbody>`;
 
   lista.forEach(f=>{
@@ -4803,9 +5035,7 @@ function telaVtVr(){
                  data-vv="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
                  title="${d.vrMes?'valor fechado do mês':'valor por dia'}">
           ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
-      <td><input class="entrada cel-vv numero" data-vv="${f.id}" data-campo="diasVr"
-                 value="${esc(diasVrDe(f))}"></td>
-      <td class="mono t-total" data-total-vr="${f.id}">${moeda(totalVrDe(f))}</td>
+      <td class="mono t-total" data-total-vr="${f.id}">${moeda(d.totalVr)}</td>
     </tr>`;
   });
 
@@ -4816,9 +5046,8 @@ function telaVtVr(){
       <td class="mono" id="vvTotalVt"><b>${
         moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
       <td></td>
-      <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(diasVrDe(f)),0)}</b></td>
       <td class="mono" id="vvTotalVr"><b>${
-        moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))}</b></td>
+        moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
     </tr></tfoot></table></div></div>`;
   return html;
 }
@@ -4830,12 +5059,12 @@ function atualizarTotaisVtVr(){
     const a = document.querySelector(`[data-total-vt="${f.id}"]`);
     const b = document.querySelector(`[data-total-vr="${f.id}"]`);
     if(a) a.textContent = moeda(d.totalVt);
-    if(b) b.textContent = moeda(totalVrDe(f));
+    if(b) b.textContent = moeda(d.totalVr);
   });
   const tvt = document.getElementById('vvTotalVt');
   const tvr = document.getElementById('vvTotalVr');
   if(tvt) tvt.innerHTML = '<b>'+moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))+'</b>';
-  if(tvr) tvr.innerHTML = '<b>'+moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))+'</b>';
+  if(tvr) tvr.innerHTML = '<b>'+moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))+'</b>';
 }
 
 function ligarVtVr(){
@@ -4844,12 +5073,6 @@ function ligarVtVr(){
       const id = c.dataset.vv;
       const l = S.folha.linhas[id] || (S.folha.linhas[id] = {funcionarioId:id});
       l[c.dataset.campo] = c.value;
-      /* os dias do VT puxam os do VR enquanto ninguém mexeu no do VR */
-      if(c.dataset.campo === 'dias'){
-        const vr = document.querySelector(`[data-vv="${id}"][data-campo="diasVr"]`);
-        if(vr && !vr.dataset.proprio){ vr.value = c.value; l.diasVr = c.value; }
-      }
-      if(c.dataset.campo === 'diasVr') c.dataset.proprio = '1';
       atualizarTotaisVtVr();
     };
     c.onblur = ()=>{ if(c.classList.contains('dinheiro') && c.value.trim()){
@@ -4859,15 +5082,29 @@ function ligarVtVr(){
     }};
   });
   const b = id => document.getElementById(id);
+  /* loja de rua e shopping costumam abrir em dias diferentes, então cada
+     uma tem o seu campo; o terceiro preenche a lista inteira de uma vez */
+  if(b('diasRua')) b('diasRua').oninput = e=>{ S.folha.diasRua = e.target.value; };
+  if(b('diasShop')) b('diasShop').oninput = e=>{ S.folha.diasShop = e.target.value; };
   if(b('vvAplicar')) b('vvAplicar').onclick = ()=>{
-    const n = b('vvDias').value.trim();
-    if(!n) return toast('Escreva quantos dias.', true);
+    const rua = String(S.folha.diasRua||'').trim();
+    const shop = String(S.folha.diasShop||'').trim();
+    const todos = String(b('vvDias').value||'').trim();
+    if(!rua && !shop && !todos){
+      return toast('Escreva os dias de rua, de shopping ou de todos.', true);
+    }
+    let n = 0;
     funcionariosDaFolha().forEach(f=>{
+      const tipo = linhaFolhaDe(f).tipoLoja;
+      const d = todos || (tipo==='SHOPPING' ? shop : tipo==='RUA' ? rua : '');
+      if(!d) return;
       const l = S.folha.linhas[f.id] || (S.folha.linhas[f.id] = {funcionarioId:f.id});
-      l.dias = n; l.diasVr = n;
+      l.dias = d;
+      n++;
     });
     desenhar();
-    toast(n + ' dias preenchidos para todos. Confira e clique em Salvar.');
+    toast(n ? n+' funcionários preenchidos. Confira e clique em Salvar.'
+            : 'Nenhuma filial da lista está marcada como rua ou shopping.', !n);
   };
   if(b('vvSalvar')) b('vvSalvar').onclick = ()=>salvarFolha();
   if(b('vvExcel')) b('vvExcel').onclick = exportarVtVrExcel;
@@ -4876,19 +5113,18 @@ function ligarVtVr(){
 async function exportarVtVrExcel(){
   await usar('xlsx');
   const lista = funcionariosDaFolha();
-  const dados = [['FUNCIONÁRIO','FILIAL','VALOR DO VT','DIAS VT','TOTAL VT',
-    'VALOR DO VR','DIAS VR','TOTAL VR']]
+  const dados = [['FUNCIONÁRIO','FILIAL','VALOR DO VT','DIAS','TOTAL VT',
+    'VALOR DO VR','TOTAL VR']]
     .concat(lista.map(f=>{
       const d = linhaFolhaDe(f);
       return [f.nome, f.filial||'', d.vtDiario, d.dias, moeda(d.totalVt),
-              d.vrDiario, diasVrDe(f), moeda(totalVrDe(f))];
+              d.vrDiario, moeda(d.totalVr)];
     }))
     .concat([['TOTAL','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
       moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
-      String(lista.reduce((s,f)=>s+valorNum(diasVrDe(f)),0)),
-      moeda(lista.reduce((s,f)=>s+totalVrDe(f),0))]]);
+      moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))]]);
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:14},{wch:14},{wch:10},{wch:14}];
+  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:14},{wch:14},{wch:14}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VT VR');
   XLSX.writeFile(wb, 'VT E VR '+compArquivo(S.competencia)+'.xlsx');
@@ -4916,15 +5152,10 @@ function telaFolha(){
         <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
-    <select class="campo" id="campoFilial">${ops.join('')}</select>
-    <div style="display:flex;gap:6px;align-items:flex-end">
-      <div><label class="campo-lbl" for="diasRua">Dias rua</label>
-        <input class="entrada mono" type="number" min="0" max="31" id="diasRua"
-               value="${esc(S.folha.diasRua||'')}" style="width:72px"></div>
-      <div><label class="campo-lbl" for="diasShop">Dias shopping</label>
-        <input class="entrada mono" type="number" min="0" max="31" id="diasShop"
-               value="${esc(S.folha.diasShop||'')}" style="width:72px"></div>
-      <button class="btn sec" id="folhaAplicar">Preencher dias</button>
+    <div class="coluna-filtro">
+      <select class="campo" id="campoFilial">${ops.join('')}</select>
+      ${podeAprovar()?`<button class="btn sec mini" id="folhaVale"
+        title="Planilha em PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale">Exportar vale</button>`:''}
     </div>
     <div class="zoom-folha" title="Diminui ou aumenta a tabela para caber na tela">
       <button id="zoomMenos" aria-label="Diminuir">−</button>
@@ -4941,8 +5172,8 @@ function telaFolha(){
   </div>
   <div class="aviso info">
     Folha de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
-    <b>Vale, VT e VR</b> repetem o último valor lançado — em cinza itálico quando vêm do
-    mês anterior. As colunas em verde são preenchidas por outras abas: horas extras,
+    O <b>vale mensal</b> repete o último valor lançado — em cinza itálico quando vem do
+    mês anterior. <b>VT e VR</b> ficam na aba VT/VR. As colunas em verde são preenchidas por outras abas: horas extras,
     adicional noturno, faltas e atrasos vêm de Horas extras; comissões vêm de Comissões;
     quebra de produtos vem de Quebras. Tudo pode ser corrigido à mão, e <b>Salvar</b>
     grava a folha e os lançamentos de uma vez.
@@ -4961,13 +5192,12 @@ function telaFolha(){
     <table class="tab-cont tab-unida"><thead>
       <tr class="grupo-col">
         <th class="col-fixa"></th><th></th>
-        <th colspan="6" class="g-folha">VALE, VT E VR</th>
+        <th class="g-folha">VALE</th>
         <th colspan="${COLS_CONT.length}" class="g-cont">CONTABILIDADE</th>
         <th></th>
       </tr>
       <tr>
         <th class="col-fixa">Funcionário</th><th>Filial</th>
-        <th>VT</th><th>Dias</th><th>Total VT</th><th>VR</th><th>Total VR</th>
         <th>Vale mensal</th>
         ${COLS_CONT.map(c=>`<th class="${c.puxa?'col-auto':''}">${esc(c.titulo)}</th>`).join('')}
         <th style="min-width:170px">Observações</th>
@@ -4980,18 +5210,6 @@ function telaFolha(){
     html += `<tr>
       <td class="col-fixa"><b>${esc(f.nome)}</b></td>
       <td style="color:var(--apagado)" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
-      <td><input class="entrada cel-folha dinheiro ${d.vtHerdado?'herdado':''}"
-                 data-f="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
-                 title="${d.vtMes?'valor fechado do mês':'valor por dia'}${d.vtHerdado?' · repetido do mês anterior':''}">
-          ${d.vtMes?'<span class="marca-mes">mês</span>':''}</td>
-      <td><input class="entrada cel-folha numero" data-f="${f.id}" data-campo="dias"
-                 value="${esc(d.dias)}"></td>
-      <td class="mono t-total">${moeda(d.totalVt)}</td>
-      <td><input class="entrada cel-folha dinheiro ${d.vrHerdado?'herdado':''}"
-                 data-f="${f.id}" data-campo="vrDiario" value="${esc(d.vrDiario)}"
-                 title="${d.vrMes?'valor fechado do mês':'valor por dia'}${d.vrHerdado?' · repetido do mês anterior':''}">
-          ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
-      <td class="mono t-total">${moeda(d.totalVr)}</td>
       <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
                  data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
                  title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
@@ -5009,11 +5227,6 @@ function telaFolha(){
   const soma = campo => lista.map(f=>(S.cont.linhas[f.id]||{})[campo]);
   html += `</tbody><tfoot><tr>
       <td class="col-fixa"><b>TOTAL</b></td><td></td>
-      <td></td>
-      <td class="mono"><b>${lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)}</b></td>
-      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0))}</b></td>
-      <td></td>
-      <td class="mono"><b>${moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
       <td class="mono"><b>${moeda(lista.reduce((s,f)=>
         s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
       ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
@@ -5188,26 +5401,6 @@ function ligarFolha(){
 
   const b = id => document.getElementById(id);
   ligarBarraLateral();
-  if(b('diasRua')) b('diasRua').oninput = e=>{ S.folha.diasRua = e.target.value; };
-  if(b('diasShop')) b('diasShop').oninput = e=>{ S.folha.diasShop = e.target.value; };
-  if(b('folhaAplicar')) b('folhaAplicar').onclick = ()=>{
-    const rua = String(S.folha.diasRua||'').trim();
-    const shop = String(S.folha.diasShop||'').trim();
-    if(!rua && !shop) return toast('Digite os dias de rua e/ou de shopping.', true);
-    let n = 0;
-    funcionariosDaFolha().forEach(f=>{
-      const tipo = linhaFolhaDe(f).tipoLoja;
-      const d = tipo==='SHOPPING' ? shop : tipo==='RUA' ? rua : '';
-      if(!d) return;
-      const l = S.folha.linhas[f.id] || (S.folha.linhas[f.id] = {funcionarioId:f.id});
-      l.dias = d;
-      n++;
-    });
-    desenhar();
-    toast(n ? n+' funcionários preenchidos ('+(rua?rua+' na rua':'')+
-              (rua&&shop?', ':'')+(shop?shop+' em shopping':'')+').'
-            : 'Nenhuma filial da lista está marcada como rua ou shopping.', !n);
-  };
   document.querySelectorAll('[data-vale]').forEach(sel=> sel.onchange = async ()=>{
     const f = S.funcionarios.find(x=>x.id===sel.dataset.vale);
     carregando(true);
@@ -5229,6 +5422,7 @@ function ligarFolha(){
   if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolhaCompleta;
   if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
   if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
+  if(b('folhaVale')) b('folhaVale').onclick = exportarValePdf;
 
   /* grupos de valores: grava ao sair do campo */
   document.querySelectorAll('[data-g]').forEach(campo=>{
@@ -5405,12 +5599,10 @@ async function salvarFolha(silencioso){
     return {
       funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
       vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
-      vrDiario:d.vrDiario, totalVr:moeda(totalVrDe(f)),
-      /* dias do VR só são gravados quando diferem dos do VT */
-      diasVr: (l.diasVr && l.diasVr !== d.dias) ? l.diasVr : '',
+      vrDiario:d.vrDiario, totalVr:moeda(d.totalVr),
       vale: f.recebeVale==='NAO' ? '' : d.vale, observacoes:d.observacoes,
       /* mexer só no VT ou no VR, sem tocar nos dias, também é um lançamento */
-      _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario || l.diasVr)
+      _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario)
     };
   }).filter(it=> it._mexido || it.dias || it.vale || it.observacoes)
     .map(it=>{ delete it._mexido; return it; });
@@ -5605,6 +5797,128 @@ async function exportarFolhaPdf(){
     baixar(new Blob([await doc.save()],{type:'application/pdf'}),
       'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.pdf');
     toast('Relatório gerado.');
+  }catch(e){ toast(e.message,true); }
+  finally{ carregando(false); }
+}
+
+/* ------------------------------------------------------------------
+   RELAÇÃO DE VALE
+   A folha inteira não serve para levar ao banco: lá só interessa para
+   quem pagar, quanto e em que conta. Esta é a lista enxuta disso —
+   nome, CPF, banco, agência, conta, filial e valor — com quem não
+   recebe vale fora dela. Respeita o filtro de filial e a busca que
+   estão na tela, para dar também a relação de uma loja só.
+   Dado bancário e CPF saem daqui, então é exportação de RH e MASTER,
+   como as demais exportações em PDF.
+   ------------------------------------------------------------------ */
+function linhasDoVale(){
+  return funcionariosDaFolha()
+    .map(f=>({f, vale: valorNum(linhaFolhaDe(f).vale)}))
+    .filter(x=>x.vale > 0);
+}
+
+async function exportarValePdf(){
+  if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar o vale.', true);
+  const itens = linhasDoVale();
+  if(!itens.length){
+    return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
+  }
+  /* Faltando dado bancário, o banco devolve a remessa. Melhor avisar agora,
+     pelo nome, do que o RH descobrir no caixa. */
+  const incompletos = itens.filter(x=>!x.f.banco || !x.f.agencia || !x.f.conta);
+  if(incompletos.length && !confirm(
+      incompletos.length+' funcionário(s) sem dados bancários completos:\n\n'+
+      incompletos.slice(0,12).map(x=>'· '+x.f.nome).join('\n')+
+      (incompletos.length>12 ? '\n· … e mais '+(incompletos.length-12) : '')+
+      '\n\nExportar assim mesmo?')){
+    return;
+  }
+
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+
+    const cab  = ['FUNCIONÁRIO','CPF','FILIAL','BANCO','AGÊNCIA','CONTA','VALE'];
+    const larg = [150, 78, 86, 70, 50, 66, 55];
+    const dir  = [false,false,false,false,false,false,true];   /* valor alinhado à direita */
+    const L=595.28, A=841.89, m=34;
+    const xs = []; let acc = m;
+    larg.forEach(w=>{ xs.push(acc); acc += w; });
+    const fim = acc;
+    const GAP = 5;
+    const encurta = (t, f, tam, max)=>{
+      t = String(t==null?'':t);
+      if(f.widthOfTextAtSize(t, tam) <= max) return t;
+      let r = t;
+      while(r.length > 1 && f.widthOfTextAtSize(r + '…', tam) > max) r = r.slice(0, -1);
+      return r + '…';
+    };
+    /* escreve encostado à direita da coluna: coluna de dinheiro se lê pela
+       vírgula, e com os valores desalinhados ninguém confere uma relação */
+    const escrever = (t, i, y, f, tam)=>{
+      const texto = encurta(t, f, tam, larg[i]-GAP);
+      const x = dir[i] ? xs[i] + larg[i] - GAP - f.widthOfTextAtSize(texto, tam) : xs[i];
+      pg.drawText(texto, {x, y, size:tam, font:f, color:rgb(.06,.07,.08)});
+    };
+
+    const totalGeral = itens.reduce((s,x)=>s + x.vale, 0);
+    let pg, y, pagina = 0;
+    const cabecalho = ()=>{
+      pg = doc.addPage([L,A]); y = A-40; pagina++;
+      const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
+      pg.drawText('Relação de vale · '+compBonita(S.competencia),
+        {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
+      pg.drawText((S.filtroFilial==='TODAS' ? 'Todas as filiais' : S.filtroFilial)+
+        ' · '+itens.length+(itens.length===1?' funcionário':' funcionários')+
+        ' · total R$ '+moeda(totalGeral),
+        {x:m, y:y-34, size:8, font:fonte, color:rgb(.42,.45,.5)});
+      y -= 50;
+      cab.forEach((t,i)=>{
+        const texto = encurta(t, fonteB, 7, larg[i]-GAP);
+        const x = dir[i] ? xs[i] + larg[i] - GAP - fonteB.widthOfTextAtSize(texto, 7) : xs[i];
+        pg.drawText(texto, {x, y, size:7, font:fonteB, color:rgb(.42,.45,.5)});
+      });
+      y -= 7;
+      pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.7, color:rgb(.8,.83,.86)});
+      y -= 13;
+    };
+    cabecalho();
+
+    itens.forEach(({f, vale})=>{
+      if(y < m+40) cabecalho();
+      const valores = [f.nome, f.cpf||'—', f.filial||'—', f.banco||'—',
+                       f.agencia||'—', f.conta||'—', moeda(vale)];
+      valores.forEach((t,i)=> escrever(t, i, y, i===6 ? fonteB : fonte, 7.5));
+      y -= 8;
+      pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.4, color:rgb(.93,.94,.95)});
+      y -= 12;
+    });
+
+    if(y < m+40) cabecalho();
+    y -= 3;
+    pg.drawLine({start:{x:m,y:y+9}, end:{x:fim,y:y+9}, thickness:.7, color:rgb(.8,.83,.86)});
+    escrever('TOTAL · '+itens.length+(itens.length===1?' funcionário':' funcionários'),
+             0, y, fonteB, 8);
+    escrever('R$ '+moeda(totalGeral), 6, y, fonteB, 8);
+
+    /* assinatura: a relação costuma ser entregue em mão e conferida */
+    if(y > m+60){
+      y -= 46;
+      pg.drawLine({start:{x:m,y}, end:{x:m+190,y}, thickness:.5, color:rgb(.6,.63,.66)});
+      pg.drawText('Conferido por', {x:m, y:y-10, size:7, font:fonte, color:rgb(.42,.45,.5)});
+      pg.drawLine({start:{x:fim-190,y}, end:{x:fim,y}, thickness:.5, color:rgb(.6,.63,.66)});
+      pg.drawText('Data', {x:fim-190, y:y-10, size:7, font:fonte, color:rgb(.42,.45,.5)});
+    }
+
+    const sufixo = S.filtroFilial==='TODAS' ? '' : ' '+S.filtroFilial;
+    baixar(new Blob([await doc.save()],{type:'application/pdf'}),
+      'VALE '+compArquivo(S.competencia)+sufixo+'.pdf');
+    toast('Relação de vale gerada: '+itens.length+' funcionários, R$ '+moeda(totalGeral)+'.');
   }catch(e){ toast(e.message,true); }
   finally{ carregando(false); }
 }
@@ -6324,7 +6638,7 @@ async function excluirNoCelular(el, id){
   carregando(true);
   try{
     await api('excluirDocumento', {id});
-    delete S.cacheArquivo[id];
+    delete S.cacheArquivo[id]; esquecerArquivoLocal(id);
     S.documentos = S.documentos.filter(x=>x.id!==id);
     desenharFichaCelular(el);
     desenhar();
@@ -8169,11 +8483,28 @@ async function verApuracoesSalvas(){
 (function(){
   try{
     const g = JSON.parse(sessionStorage.getItem('rh')||'null');
-    if(g && g.s){
-      document.getElementById('loginUsuario').value = g.u==='MASTER'?'':g.u;
-      document.getElementById('loginSenha').value = g.s;
-      entrar();
+    if(!g || !g.s) return;
+    document.getElementById('loginUsuario').value = g.u==='MASTER'?'':g.u;
+    document.getElementById('loginSenha').value = g.s;
+    S.usuario = g.u || 'MASTER'; S.senha = g.s;
+    /* Pinta a tela inteira com a última carga guardada, antes de falar com a
+       nuvem. O login continua acontecendo em seguida, em silêncio: se a senha
+       mudou ou os dados mudaram, a tela se corrige sozinha em um segundo. */
+    const c = lerCarga();
+    if(c){
+      try{
+        document.getElementById('login').style.display='none';
+        document.getElementById('app').style.display='block';
+        prepararTela();
+        aplicarCarga(c);
+        _pintadoDoCache = true;
+      }catch(e){
+        _pintadoDoCache = false;
+        document.getElementById('app').style.display='none';
+        document.getElementById('login').style.display='';
+      }
     }
+    entrar();
   }catch(e){}
 })();
 </script>
