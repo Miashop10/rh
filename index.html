@@ -176,10 +176,6 @@ select.campo,input.campo{
 .btn.perigo{background:var(--vermelho)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.mini{padding:6px 10px;font-size:12px}
-/* O botão de exportar o vale fica embaixo do seletor de filial, não ao lado:
-   ele age sobre a filial escolhida, e junto dela isso fica à vista. */
-.coluna-filtro{display:flex;flex-direction:column;gap:6px;align-self:flex-start}
-.coluna-filtro .btn.mini{width:100%}
 
 /* ---------- FILIAL ---------- */
 .filial{background:var(--cartao);border:1px solid var(--linha);border-radius:3px;margin-bottom:14px;overflow:hidden}
@@ -1928,6 +1924,8 @@ function barraFiltros(comBotao){
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
+    ${comBotao&&podeAprovar()?`<button class="btn sec" id="folhaVale"
+      title="Planilha em PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale do mês">Exportar vale</button>`:''}
     ${comBotao?'<button class="btn" id="btnNovo">Cadastrar funcionário</button>':''}
   </div>`;
 }
@@ -2190,6 +2188,7 @@ function ligarDelegacao(){
     if((el = alvo('#btnNovo')))           { abrirFuncionario(null); return; }
     if((el = alvo('#verExcluidos')))      { abrirExcluidos(); return; }
     if((el = alvo('#btnImportar')))       { abrirImportacao(); return; }
+    if((el = alvo('#folhaVale')))         { exportarValePdf(); return; }
     if((el = alvo('#verOpcionais')))      { abrirOpcionais(); return; }
     if((el = alvo('[data-pend]'))){
       S.pendAberta = S.pendAberta===el.dataset.pend ? null : el.dataset.pend;
@@ -5152,11 +5151,7 @@ function telaFolha(){
         <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
-    <div class="coluna-filtro">
-      <select class="campo" id="campoFilial">${ops.join('')}</select>
-      ${podeAprovar()?`<button class="btn sec mini" id="folhaVale"
-        title="Planilha em PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale">Exportar vale</button>`:''}
-    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
     <div class="zoom-folha" title="Diminui ou aumenta a tabela para caber na tela">
       <button id="zoomMenos" aria-label="Diminuir">−</button>
       <span class="valor" id="zoomValor">100%</span>
@@ -5422,7 +5417,6 @@ function ligarFolha(){
   if(b('folhaSalvar')) b('folhaSalvar').onclick = salvarFolhaCompleta;
   if(b('folhaExcel')) b('folhaExcel').onclick = exportarFolhaExcel;
   if(b('folhaPdf')) b('folhaPdf').onclick = exportarFolhaPdf;
-  if(b('folhaVale')) b('folhaVale').onclick = exportarValePdf;
 
   /* grupos de valores: grava ao sair do campo */
   document.querySelectorAll('[data-g]').forEach(campo=>{
@@ -5819,6 +5813,20 @@ function linhasDoVale(){
 
 async function exportarValePdf(){
   if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar o vale.', true);
+  /* O botão fica na aba Funcionários, que não carrega a folha. Sem isto a
+     relação sairia só com os valores de cadastro e ignoraria o que o RH
+     lançou no mês. */
+  if(S.folha.competencia !== S.competencia){
+    await carregarFolha();
+    /* outra parte da tela já podia estar buscando a mesma folha: espera ela */
+    for(let i=0; i<40 && S.folha.competencia !== S.competencia; i++){
+      await new Promise(r=>setTimeout(r, 150));
+    }
+    if(S.folha.competencia !== S.competencia){
+      return toast('Não consegui buscar a folha de '+compBonita(S.competencia)+
+                   '. Tente de novo.', true);
+    }
+  }
   const itens = linhasDoVale();
   if(!itens.length){
     return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
