@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.19b';
+  const VERSAO_APP = '2026.10.20b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -250,6 +250,15 @@ select.campo,input.campo{
 .grade{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .grade .full{grid-column:1/-1}
 .entrada{width:100%;padding:9px 11px;border:1px solid var(--linha);border-radius:2px;background:#fff}
+/* Filhos: uma linha por filho, com nome, CPF, nascimento e o ✕ de tirar.
+   O nome ganha o espaço que sobra porque é o que mais varia de tamanho. */
+.filho{display:grid;grid-template-columns:1fr 150px 150px 30px;gap:8px;margin-bottom:8px}
+.filho .f-tira{
+  border:1px solid var(--linha);border-radius:2px;background:var(--cartao);
+  color:var(--apagado);font-size:13px;line-height:1;
+}
+.filho .f-tira:hover{background:#f6f7f9;color:var(--vermelho);border-color:var(--vermelho)}
+@media(max-width:640px){ .filho{grid-template-columns:1fr 1fr 30px} .filho .f-nome{grid-column:1/-1} }
 textarea.entrada{min-height:70px;resize:vertical}
 
 /* ---------- DOCUMENTOS ---------- */
@@ -691,10 +700,10 @@ body.tela-larga .tab-unida thead tr:nth-child(2) th{max-width:86px}
 body.tela-larga .tab-unida .col-fixa{white-space:nowrap}
 body.tela-larga .tab-unida .entrada{padding:4px 5px;font-size:12px}
 body.tela-larga .tab-unida .col-fixa{min-width:176px}
-#folhaRolagem{transform-origin:top left}
+#conteudo .rolagem-alta, #conteudo .previa{transform-origin:top left}
 .zoom-folha{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .zoom-folha button{
-  width:28px;height:28px;border:1px solid var(--linha);border-radius:2px;
+  width:26px;height:26px;border:1px solid var(--linha);border-radius:2px;
   background:var(--cartao);font-size:15px;line-height:1;color:var(--grafite);
 }
 .zoom-folha button:hover{background:var(--papel)}
@@ -1028,6 +1037,14 @@ body.celular .cel-ficha-corpo{padding-bottom:200px}
         <label for="competencia">Competência</label>
         <input type="month" id="competencia">
       </div>
+      <!-- vale para a aba aberta: encolhe a tabela até ela caber na tela -->
+      <div class="zoom-folha" id="zoomCtrl" title="Diminui ou aumenta a tabela desta aba para caber na tela">
+        <button id="zoomMenos" aria-label="Diminuir">−</button>
+        <span class="valor" id="zoomValor">100%</span>
+        <button id="zoomMais" aria-label="Aumentar">+</button>
+        <button id="zoomAjustar" style="width:auto;padding:0 8px;font-size:11px"
+                title="Ajusta para a tabela inteira caber na largura da tela">Caber</button>
+      </div>
       <div class="estado" id="estado" title="Conexão com a nuvem"><i></i><span>Online</span></div>
       <div class="quem"><b id="quemNome">—</b><small id="quemPapel">—</small></div>
       <!-- a versão fica à vista: saber qual arquivo está rodando é a primeira
@@ -1119,6 +1136,8 @@ const S = {
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'', zoom:null },
+  /* tamanho escolhido à mão em cada aba; sem escolha, o sistema ajusta sozinho */
+  zoom:{},
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] },
   avisos:[]
@@ -1130,7 +1149,7 @@ const ROTULO_ABA = {
   EX_FUNCIONARIOS:'Ex-funcionários',
   PENDENCIAS:'Pendências',
   HORAS_EXTRAS:'Horas extras',
-  COMISSOES:'Comissões',
+  COMISSOES:'Premiação',
   QUEBRAS:'Quebras',
   FOLHA:'Folha de pagamento',
   VT_VR:'VT/VR',
@@ -1721,10 +1740,21 @@ function docsDe(funcId, comp){
 function ehGerenteDeLoja(f){
   return /\bGERENTES?\b/.test(normalizar((f && f.cargo) || ''));
 }
+/* Filial que não paga VR não tem recibo de VR para anexar: o campo some da
+   lista de obrigatórios, o nome não fica vermelho por causa dele e ele não
+   entra na conta de pendências da loja. É marcado na engrenagem → Filiais,
+   e não no código, porque amanhã pode ser outra loja. */
+function filialSemVr(nome){
+  const fl = S.filiais.find(x=>x.nome === nome);
+  return !!(fl && fl.semVr === 'SIM');
+}
+
 function tiposDe(f){
-  const todos = S.config.tiposObrigatorios || [];
-  if(!ehGerenteDeLoja(f)) return todos;
-  return todos.filter(t=> !/CART[AÃ]O\s*PONTO/.test(normalizar(t)));
+  let todos = S.config.tiposObrigatorios || [];
+  /* Gerente de loja não bate cartão ponto */
+  if(ehGerenteDeLoja(f)) todos = todos.filter(t=> !/CART[AÃ]O\s*PONTO/.test(normalizar(t)));
+  if(filialSemVr(f && f.filial)) todos = todos.filter(t=> normalizar(t) !== 'VR');
+  return todos;
 }
 
 function situacao(f){
@@ -1926,9 +1956,9 @@ function desenhar(){
      de telefone, de uma coluna só. As outras abas, se tiver, seguem como
      estão — já encolhem sozinhas no telefone. */
   document.body.classList.toggle('celular', interfaceCelular());
-  /* a folha tem 23 colunas: nela a página usa a janela toda */
-  document.body.classList.toggle('tela-larga',
-    (S.aba === 'FOLHA' || S.aba === 'VT_VR') && !interfaceCelular());
+  /* Todas as abas usam a janela inteira: a largura que sobrava nas laterais
+     era justamente o que faltava às tabelas, obrigando a rolar para o lado. */
+  document.body.classList.toggle('tela-larga', !interfaceCelular());
   document.body.classList.toggle('uma-aba',
     interfaceCelular() && S.sessao.abas.filter(a=>a!=='ADMIN').length <= 1);
   if(interfaceCelular() && S.aba==='ANEXAR'){
@@ -1958,6 +1988,8 @@ function desenhar(){
   if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
   if(S.aba==='VT_VR') ligarVtVr();
   if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
+  /* por último: mede a tabela já montada e encolhe o que não couber */
+  ligarZoom();
 
   /* A janela vem antes: ajustarRolagem mede a altura da tabela a partir da
      posição da página, então devolver a rolagem da janela depois faria a
@@ -2439,7 +2471,92 @@ function confirmarExclusao(funcId){
    ================================================================== */
 const CAMPOS_FICHA = ['horarioTrabalho','salario','conducoesIda','conducoesVolta',
   'rg','orgaoEmissor','expedicao','pis','ctps','nascimento','escolaridade',
-  'filhosMenores14','nomePai','nomeMae','etnia','endereco','celular','email'];
+  'filhosMenores14','nomePai','nomeMae','etnia','endereco','celular','email',
+  'estadoCivil','filhos','uniforme','uniformeData'];
+
+/* Campos que não são um input só e por isso não entram pelo caminho comum
+   de ler "#fi_<campo>.value": a lista de filhos é montada e lida à parte. */
+const CAMPOS_FICHA_COMPOSTOS = ['filhos'];
+
+const ESTADOS_CIVIS = ['SOLTEIRO','CASADO','VIÚVO','DIVORCIADO'];
+
+/* ------------------------------------------------------------------
+   FILHOS
+   Guardados em JSON numa coluna só: a quantidade varia de funcionário
+   para funcionário, e abrir uma coluna por filho deixaria a planilha
+   cheia de colunas vazias.
+   ------------------------------------------------------------------ */
+function lerFilhos(txt){
+  if(Array.isArray(txt)) return txt;
+  try{
+    const a = JSON.parse(txt || '[]');
+    return Array.isArray(a) ? a.filter(x=>x && typeof x === 'object') : [];
+  }catch(e){ return []; }
+}
+
+function linhaFilho(fl){
+  fl = fl || {};
+  return `<div class="filho">
+    <input class="entrada f-nome" placeholder="Nome do filho" value="${esc(fl.nome||'')}">
+    <input class="entrada mono f-cpf" placeholder="CPF" value="${esc(fl.cpf||'')}">
+    <input class="entrada f-nasc" type="date" value="${esc(fl.nascimento||'')}">
+    <button type="button" class="f-tira" title="Retirar este filho" aria-label="Retirar">✕</button>
+  </div>`;
+}
+
+function blocoFilhos(lista){
+  const fs = lerFilhos(lista);
+  return `<div class="full">
+    <label class="campo-lbl">Filhos</label>
+    <div id="fiFilhos">${fs.map(linhaFilho).join('') || linhaFilho({})}</div>
+    <button type="button" class="btn sec mini" id="fiAddFilho"
+            style="margin-top:6px">+ Adicionar filho</button>
+  </div>`;
+}
+
+/* Lê a lista da tela. Linha totalmente em branco não vira filho: o campo
+   começa com uma linha vazia só para convidar a digitar. */
+function filhosDaTela(el){
+  const cx = el.querySelector('#fiFilhos');
+  if(!cx) return null;
+  const fs = [...cx.querySelectorAll('.filho')].map(d=>({
+    nome: d.querySelector('.f-nome').value.trim(),
+    cpf: d.querySelector('.f-cpf').value.trim(),
+    nascimento: d.querySelector('.f-nasc').value
+  })).filter(x=>x.nome || x.cpf || x.nascimento);
+  return JSON.stringify(fs);
+}
+
+/* Liga o que a grade de campos tem de vivo: adicionar e tirar filho, e o
+   campo de data do uniforme, que só aparece quando a resposta é Sim.
+   Roda toda vez que a grade é redesenhada — inclusive quando a ficha
+   chega do servidor e substitui o bloco inteiro. */
+function ligarCamposDaFicha(el){
+  const add = el.querySelector('#fiAddFilho');
+  const cx = el.querySelector('#fiFilhos');
+  if(add && cx){
+    add.onclick = ()=>{
+      cx.insertAdjacentHTML('beforeend', linhaFilho({}));
+      ligarCamposDaFicha(el);
+      const ultimo = cx.querySelector('.filho:last-child .f-nome');
+      if(ultimo) ultimo.focus();
+    };
+    cx.querySelectorAll('.f-tira').forEach(b=>{
+      b.onclick = ()=>{
+        const linhas = cx.querySelectorAll('.filho');
+        if(linhas.length > 1) b.closest('.filho').remove();
+        else b.closest('.filho').querySelectorAll('input').forEach(i=>i.value='');
+      };
+    });
+  }
+  const uni = el.querySelector('#fi_uniforme');
+  const box = el.querySelector('#boxUniformeData');
+  if(uni && box){
+    const mostrar = ()=>{ box.style.display = uni.value === 'SIM' ? '' : 'none'; };
+    uni.onchange = mostrar;
+    mostrar();
+  }
+}
 
 const ESCOLARIDADES = ['Fundamental incompleto','Fundamental completo',
   'Médio incompleto','Médio completo','Técnico','Superior incompleto',
@@ -2483,6 +2600,7 @@ function camposDaFicha(d){
     ${texto('pis','P.I.S')}
     ${texto('ctps','CTPS','Número e série')}
     ${data('nascimento','Nascimento')}
+    ${escolhe('estadoCivil','Estado civil', ESTADOS_CIVIS)}
     ${escolhe('escolaridade','Escolaridade', ESCOLARIDADES)}
     <div><label class="campo-lbl" for="fi_filhosMenores14">Filhos menores de 14 anos</label>
       <select class="entrada" id="fi_filhosMenores14">
@@ -2495,7 +2613,17 @@ function camposDaFicha(d){
     ${texto('nomeMae','Nome da mãe','', true)}
     ${texto('endereco','Endereço','Rua, número, complemento, bairro, cidade e CEP', true)}
     ${texto('celular','Celular','(41) 90000-0000')}
-    ${texto('email','E-mail')}`;
+    ${texto('email','E-mail')}
+    ${blocoFilhos(d.filhos)}
+    <div><label class="campo-lbl" for="fi_uniforme">Uniforme</label>
+      <select class="entrada" id="fi_uniforme">
+        <option value="">—</option>
+        <option value="NAO" ${d.uniforme==='NAO'?'selected':''}>Não</option>
+        <option value="SIM" ${d.uniforme==='SIM'?'selected':''}>Sim</option>
+      </select></div>
+    <div id="boxUniformeData" style="display:none">
+      <label class="campo-lbl" for="fi_uniformeData">Recebimento do uniforme</label>
+      <input class="entrada" type="date" id="fi_uniformeData" value="${v('uniformeData')}"></div>`;
 }
 
 /* Busca a ficha e troca o bloco pelos campos preenchidos. Enquanto não
@@ -2509,6 +2637,7 @@ async function carregarFicha(el, id){
     const d = await api('fichaFuncionario', {id}, {silencioso:true});
     if(!document.body.contains(el)) return;
     caixa.innerHTML = camposDaFicha(d);
+    ligarCamposDaFicha(el);
     el._fichaPronta = true;
     ['#fFicha','#fLgpd'].forEach(q=>{
       const b = el.querySelector(q);
@@ -2565,8 +2694,10 @@ async function exportarFichaCadastro(f, ficha){
     /* duas colunas; um campo largo ocupa a linha inteira */
     const COL = (L - 2*m) / 2;
     let coluna = 0;
-    /* a ficha tem de caber numa folha só: é ela que vai para a pasta */
-    const ALT = 28;
+    /* A ficha tem de caber numa folha só: é ela que vai para a pasta. Com
+       filhos e uniforme na folha, 28 pontos por linha jogavam a assinatura
+       para a segunda página. */
+    const ALT = 25;
     const campo = (rot, val, largo)=>{
       if(largo && coluna === 1){ y -= ALT; coluna = 0; }
       if(y < m+40) { folhaNova(); coluna = 0; }
@@ -2581,16 +2712,20 @@ async function exportarFichaCadastro(f, ficha){
       pg.drawLine({start:{x, y:y-16}, end:{x:x+larg, y:y-16}, thickness:.5, color:linha});
       if(largo || coluna === 1){ y -= ALT; coluna = 0; } else { coluna = 1; }
     };
-    const fim = ()=>{ if(coluna === 1){ y -= ALT; coluna = 0; } y -= 5; };
+    const fim = ()=>{ if(coluna === 1){ y -= ALT; coluna = 0; } y -= 3; };
     const d = ficha || {};
     const dt = v => v ? dataBonita(v) : '';
 
+    /* Os campos largos (nome, pai, mãe) vêm primeiro, e os estreitos depois,
+       em pares. Assim o espaço que sobra cai no fim da seção, e não como um
+       buraco no meio da folha. */
     titulo('Identificação');
     campo('Nome completo', f.nome, true);
-    campo('Nascimento', dt(d.nascimento));
-    campo('Etnia', d.etnia);
     campo('Nome do pai', d.nomePai, true);
     campo('Nome da mãe', d.nomeMae, true);
+    campo('Nascimento', dt(d.nascimento));
+    campo('Estado civil', d.estadoCivil);
+    campo('Etnia', d.etnia);
     campo('Escolaridade', d.escolaridade);
     campo('Filhos menores de 14 anos', d.filhosMenores14 === 'SIM' ? 'Sim'
       : d.filhosMenores14 === 'NAO' ? 'Não' : '');
@@ -2612,24 +2747,59 @@ async function exportarFichaCadastro(f, ficha){
     fim();
 
     titulo('Contrato de trabalho');
+    /* O CNPJ é da filial em que ele trabalha: é esse o empregador no papel,
+       e sem ele a ficha não identifica a empresa que assina embaixo. */
+    const filial = S.filiais.find(x=>x.nome === f.filial) || {};
     campo('Filial', f.filial);
+    campo('CNPJ da filial', filial.cnpj);
     campo('Cargo', f.cargo);
     campo('Admissão', dt(f.dataAdmissao));
-    campo('Início', dt(f.dataInicio));
     campo('Horário de trabalho', d.horarioTrabalho, true);
     campo('Salário', d.salario ? 'R$ ' + d.salario : '');
     campo('Nº de conduções', (d.conducoesIda || d.conducoesVolta)
       ? 'ida (' + (d.conducoesIda||'0') + ')   volta (' + (d.conducoesVolta||'0') + ')' : '');
     campo('Situação', (SITUACOES[f.status]||{}).rotulo);
     campo('Demissão', dt(f.dataDemissao));
+    campo('Uniforme', d.uniforme === 'SIM' ? 'Sim' : d.uniforme === 'NAO' ? 'Não' : '');
+    campo('Recebimento do uniforme', d.uniforme === 'SIM' ? dt(d.uniformeData) : '');
     fim();
 
-    titulo('Dados bancários');
-    campo('Banco', f.banco);
-    campo('Agência', f.agencia);
-    campo('Conta', f.conta ? f.conta + (f.tipoConta==='POUPANCA' ? '  (poupança)' : '  (corrente)') : '');
-    campo('Recebe vale mensal', f.recebeVale === 'NAO' ? 'Não' : 'Sim');
-    fim();
+    /* Os filhos só ganham seção quando existem: numa ficha de quem não tem
+       filho, um quadro vazio só ocupa a folha. */
+    const filhos = lerFilhos(d.filhos);
+    if(filhos.length){
+      titulo('Filhos');
+      /* Um filho por linha, em três colunas, com os rótulos só uma vez no
+         alto: em duas linhas por filho, quem tem três filhos já joga a
+         assinatura para a segunda folha. */
+      const LC = [(L-2*m)*0.50, (L-2*m)*0.27, (L-2*m)*0.23];
+      const x3 = [m, m+LC[0], m+LC[0]+LC[1]];
+      const cabFilhos = ()=>{
+        ['Nome','CPF','Nascimento'].forEach((t,i)=>
+          pg.drawText(t, {x:x3[i], y, size:7, font:fonteB, color:apagado}));
+        y -= 13;
+      };
+      cabFilhos();
+      filhos.forEach(fl=>{
+        if(y < m+40){ folhaNova(); cabFilhos(); }
+        [fl.nome, fl.cpf, dt(fl.nascimento)].forEach((t,i)=>{
+          let txt = String(t==null?'':t).trim() || '—';
+          while(fonte.widthOfTextAtSize(txt, 10) > LC[i]-12 && txt.length > 2){
+            txt = txt.slice(0, -2) + '…';
+          }
+          pg.drawText(txt, {x:x3[i], y, size:10, font:fonte, color:tinta});
+        });
+        y -= 4;
+        pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.5, color:linha});
+        y -= 14;
+      });
+      y -= 3;
+    }
+
+    /* Banco, agência, conta e o vale mensal ficam de fora de propósito: esta
+       ficha é impressa, assinada e circula em mão. Conta bancária só sai na
+       relação de vale, que vai do RH direto para o banco. Os dados continuam
+       no cadastro — só não são impressos aqui. */
 
     /* assinatura: a ficha é impressa e guardada na pasta do funcionário */
     if(y < m+62) folhaNova();
@@ -2983,6 +3153,9 @@ function abrirFuncionario(id, extra){
   };
   el.querySelector('#fFilial').addEventListener('change', mostrarCnpj);
   mostrarCnpj();
+  /* cadastro novo já tem a grade em branco na tela: liga agora. Na edição,
+     carregarFicha troca a grade pelos dados e liga de novo. */
+  ligarCamposDaFicha(el);
   /* a ficha completa vem do servidor, só agora que a tela de edição abriu */
   carregarFicha(el, id);
 
@@ -3010,6 +3183,8 @@ function abrirFuncionario(id, extra){
       const i = el.querySelector('#fi_'+c);
       if(i) dados[c] = i.value.trim();
     });
+    const fs = filhosDaTela(el);
+    if(fs !== null) dados.filhos = fs;
     return dados;
   };
   const bFicha = el.querySelector('#fFicha');
@@ -3066,6 +3241,8 @@ function abrirFuncionario(id, extra){
         const i = el.querySelector('#fi_'+c);
         if(i) dados[c] = i.value.trim();
       });
+      const fs = filhosDaTela(el);
+      if(fs !== null) dados.filhos = fs;
     }
     if(!dados.nome || !dados.filial){
       el.querySelector('#fErro').innerHTML = '<div class="aviso erro">Informe o nome completo e a filial.</div>'; return;
@@ -4019,7 +4196,9 @@ function subAdmin(el, qual){
         <input class="entrada mono" id="novaFilialCnpj" placeholder="CNPJ (opcional)" style="min-width:170px">
         <button class="btn" id="addFilial">Adicionar filial</button>
       </div>
-      <table class="lista"><thead><tr><th>Filial</th><th>CNPJ</th><th>Grupo VT/VR</th><th>Funcionários</th><th></th></tr></thead><tbody>
+      <table class="lista"><thead><tr><th>Filial</th><th>CNPJ</th><th>Grupo VT/VR</th>
+        <th title="Filial que não paga VR não pede o recibo de VR nos documentos obrigatórios">Paga VR</th>
+        <th>Funcionários</th><th></th></tr></thead><tbody>
       ${S.filiais.map(f=>{
         const n = S.funcionarios.filter(x=>x.filial===f.nome).length;
         return `<tr>
@@ -4030,12 +4209,17 @@ function subAdmin(el, qual){
             <option value="">— sem grupo —</option>
             ${S.grupos.map(g=>`<option value="${esc(g.nome)}" ${g.nome===f.grupo?'selected':''}>${esc(g.nome)}</option>`).join('')}
           </select></td>
+          <td><select class="entrada" data-fil-vr="${f.id}"
+                 title="Em Não, o recibo de VR deixa de ser cobrado de quem trabalha nesta filial">
+            <option value="" ${f.semVr!=='SIM'?'selected':''}>Sim</option>
+            <option value="SIM" ${f.semVr==='SIM'?'selected':''}>Não</option>
+          </select></td>
           <td class="mono">${n}</td>
           <td style="text-align:right;white-space:nowrap">
             <button class="link-acao" data-fil-salvar="${f.id}">Salvar</button>
             <button class="link-acao rem" data-fil-excluir="${f.id}">Excluir</button>
           </td></tr>`;
-      }).join('') || '<tr><td colspan="5" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
+      }).join('') || '<tr><td colspan="6" style="color:var(--apagado)">Nenhuma filial cadastrada.</td></tr>'}
       </tbody></table>`;
     c.querySelector('#addFilial').onclick = async ()=>{
       const nome = c.querySelector('#novaFilial').value.trim();
@@ -4048,7 +4232,8 @@ function subAdmin(el, qual){
       const nome = c.querySelector(`[data-fil-nome="${id}"]`).value.trim();
       const cnpj = c.querySelector(`[data-fil-cnpj="${id}"]`).value.trim();
       const grupo = c.querySelector(`[data-fil-grupo="${id}"]`).value;
-      await acao('salvarFilial',{id,nome,cnpj,grupo}, el, qual, 'Filial atualizada.');
+      const semVr = c.querySelector(`[data-fil-vr="${id}"]`).value;
+      await acao('salvarFilial',{id,nome,cnpj,grupo,semVr}, el, qual, 'Filial atualizada.');
     });
     c.querySelectorAll('[data-fil-excluir]').forEach(b=> b.onclick = async ()=>{
       if(!confirm('Excluir esta filial?')) return;
@@ -4205,9 +4390,10 @@ async function acao(nome, dados, el, qual, msg){
 }
 
 /* ==================================================================
-   ABA COMISSÕES
+   ABA PREMIAÇÃO (a chave interna continua COMISSOES: trocá-la apagaria
+   a permissão de quem já tem a aba liberada no cadastro de usuários)
    Meta diária por funcionário e o registro dos dias em que ela foi
-   batida. O total do mês alimenta a coluna COMISSÕES da contabilidade.
+   batida. O total do mês alimenta a coluna PREMIAÇÃO da folha.
    ================================================================== */
 function funcionariosDaComissao(){
   return S.funcionarios
@@ -4252,9 +4438,9 @@ function telaComissoes(){
     <button class="btn" id="comSalvar">Salvar metas</button>
   </div>
   <div class="aviso info">
-    Comissões de <b>${compBonita(S.competencia)}</b>. Defina a meta diária de cada um e,
+    Premiação de <b>${compBonita(S.competencia)}</b>. Defina a meta diária de cada um e,
     a cada dia batido, clique em <b>Dias batidos</b> para lançar a data e o valor.
-    O total do mês vai direto para a coluna COMISSÕES da aba Contabilidade.
+    O total do mês vai direto para a coluna <b>PREMIAÇÃO</b> da folha de pagamento.
   </div>`;
 
   if(!lista.length) return html + vazio('Nenhum funcionário ativo','Ajuste a busca ou o filtro de filial.');
@@ -4453,7 +4639,7 @@ async function exportarComissoesExcel(){
   const ws2 = XLSX.utils.aoa_to_sheet(detalhe);
   ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}];
   XLSX.utils.book_append_sheet(wb, ws2, 'DIAS BATIDOS');
-  XLSX.writeFile(wb, 'COMISSOES '+compArquivo(S.competencia)+'.xlsx');
+  XLSX.writeFile(wb, 'PREMIACAO '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -4994,7 +5180,11 @@ function linhaFolhaDe(f){
   const dias = l.dias || '';
   /* o vale repete todo mês: sem lançamento na competência, usa o do cadastro */
   const valeSalvo = (l.vale && l.vale !== 'NÃO RECEBE') ? l.vale : '';
-  const vale = valeSalvo || (f.recebeVale==='NAO' ? '' : (f.valePadrao || ''));
+  /* Em férias não há vale mensal: enquanto a situação for FÉRIAS, o campo
+     fica em NÃO RECEBE sozinho, sem o RH precisar lembrar de zerar um por
+     um — e volta sozinho quando a situação voltar a EMPREGADO. */
+  const semVale = f.recebeVale === 'NAO' || f.status === 'FERIAS';
+  const vale = semVale ? '' : (valeSalvo || f.valePadrao || '');
   /* grupo com valor fechado do mês não multiplica pelos dias */
   const vtMes = !!(g && g.vtTipo === 'MES');
   const vrMes = !!(g && g.vrTipo === 'MES');
@@ -5002,7 +5192,8 @@ function linhaFolhaDe(f){
     grupo: g ? g.nome : '', grupoProprio: !!(f.grupo && g && g.nome===f.grupo),
     tipoLoja: g ? (g.tipoLoja||'RUA') : '',
     vtDiario: vt, vrDiario: vr, dias, vtMes, vrMes,
-    vale, observacoes: l.observacoes || '',
+    vale, semVale, emFerias: f.status === 'FERIAS',
+    observacoes: l.observacoes || '',
     valeHerdado: !valeSalvo && !!vale,
     vtHerdado: !vtSalvo && !!vt, vrHerdado: !vrSalvo && !!vr,
     totalVt: vtMes ? valorNum(vt) : valorNum(vt) * valorNum(dias),
@@ -5224,13 +5415,6 @@ function telaFolha(){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
-    <div class="zoom-folha" title="Diminui ou aumenta a tabela para caber na tela">
-      <button id="zoomMenos" aria-label="Diminuir">−</button>
-      <span class="valor" id="zoomValor">100%</span>
-      <button id="zoomMais" aria-label="Aumentar">+</button>
-      <button id="zoomAjustar" style="width:auto;padding:0 8px;font-size:11px"
-              title="Ajusta para a tabela inteira caber na largura da tela">Caber</button>
-    </div>
     <button class="btn sec" id="contPuxar">Puxar horas extras</button>
     <button class="btn sec" id="folhaExcel">Excel</button>
     <button class="btn sec" id="folhaPdf">PDF folha</button>
@@ -5240,8 +5424,9 @@ function telaFolha(){
   <div class="aviso info">
     Folha de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
     O <b>vale mensal</b> repete o último valor lançado — em cinza itálico quando vem do
-    mês anterior. <b>VT e VR</b> ficam na aba VT/VR. As colunas em verde são preenchidas por outras abas: horas extras,
-    adicional noturno, faltas e atrasos vêm de Horas extras; comissões vêm de Comissões;
+    mês anterior. Quem está em <b>férias</b> fica em NÃO RECEBE enquanto durar,
+    e volta sozinho quando a situação voltar a Empregado. <b>VT e VR</b> ficam na aba VT/VR. As colunas em verde são preenchidas por outras abas: horas extras,
+    adicional noturno, faltas e atrasos vêm de Horas extras; a premiação vem de Premiação;
     quebra de produtos vem de Quebras. Tudo pode ser corrigido à mão, e <b>Salvar</b>
     grava a folha e os lançamentos de uma vez.
   </div>
@@ -5279,8 +5464,11 @@ function telaFolha(){
       <td style="color:var(--apagado)" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
       <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
                  data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
-                 title="${d.valeHerdado?'Repetido do mês anterior — digite por cima para alterar':''}"
-                 ${f.recebeVale==='NAO'?'disabled':''}></td>
+                 placeholder="${d.semVale?'NÃO RECEBE':''}"
+                 title="${d.emFerias ? 'Em férias: não recebe vale mensal. Volta sozinho quando a situação voltar a Empregado.'
+                   : d.semVale ? 'Marcado como não recebe vale mensal no cadastro.'
+                   : d.valeHerdado ? 'Repetido do mês anterior — digite por cima para alterar' : ''}"
+                 ${d.semVale?'disabled':''}></td>
       ${COLS_CONT.map(c=>`<td class="${c.puxa?'col-auto':''}">
         <input class="entrada cel-cont ${c.tipo}" data-f="${f.id}" data-campo="${c.campo}"
                value="${esc(l[c.campo]||'')}"
@@ -5295,7 +5483,7 @@ function telaFolha(){
   html += `</tbody><tfoot><tr>
       <td class="col-fixa"><b>TOTAL</b></td><td></td>
       <td class="mono"><b>${moeda(lista.reduce((s,f)=>
-        s + (f.recebeVale==='NAO' ? 0 : valorNum(linhaFolhaDe(f).vale)),0))}</b></td>
+        s + valorNum(linhaFolhaDe(f).vale),0))}</b></td>
       ${COLS_CONT.map(c=>`<td class="mono ${c.puxa?'col-auto':''}"><b>${
         totalDaColuna(c, soma(c.campo))
       }</b></td>`).join('')}
@@ -5394,25 +5582,28 @@ async function carregarFolha(){
 }
 
 /* ------------------------------------------------------------------
-   ZOOM DA FOLHA
+   ZOOM DAS TABELAS
+   Várias abas têm tabela mais larga do que a tela, e rolar para o lado
+   para conferir dinheiro é péssimo: some justamente a coluna do nome.
    O zoom do CSS encolhe a tabela de verdade — inclusive os campos de
    digitação e o cabeçalho congelado —, ao contrário de um transform,
-   que quebraria a rolagem. Ao abrir a aba o sistema já escolhe o
-   tamanho em que a tabela inteira cabe, e a pessoa ajusta se quiser.
+   que quebraria a rolagem.
+
+   Ao abrir qualquer aba o sistema já põe cada tabela no tamanho em que
+   ela cabe inteira. O controle no alto permite ajustar: a escolha vale
+   para a aba onde foi feita e é lembrada enquanto a sessão durar.
    ------------------------------------------------------------------ */
 const ZOOMS = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 1];
 
-function aplicarZoomFolha(){
-  const cx = document.getElementById('folhaRolagem');
-  if(!cx) return;
-  cx.style.zoom = S.folha.zoom || 1;
-  const v = document.getElementById('zoomValor');
-  if(v) v.textContent = Math.round((S.folha.zoom || 1) * 100) + '%';
+/* As caixas que rolam para o lado dentro do conteúdo. Cada aba tem a sua;
+   algumas têm mais de uma (a folha tem a tabela e, embaixo, a de grupos). */
+function caixasDeZoom(){
+  return [...document.querySelectorAll('#conteudo .rolagem-alta, #conteudo .previa')]
+    .filter(c => c.querySelector('table'));
 }
 
 /* o maior zoom em que a tabela inteira cabe na largura disponível */
-function zoomQueCabe(){
-  const cx = document.getElementById('folhaRolagem');
+function zoomQueCabeEm(cx){
   const tab = cx && cx.querySelector('table');
   if(!tab) return 1;
   const antes = cx.style.zoom;
@@ -5428,31 +5619,69 @@ function zoomQueCabe(){
   return Math.max(0.6, Math.floor(((tem - 2) / precisa) * 100) / 100);
 }
 
-function ligarZoomFolha(){
+/* compatibilidade: a folha chamava esta função pelo nome antigo */
+function zoomQueCabe(){
+  return zoomQueCabeEm(document.getElementById('folhaRolagem'));
+}
+
+/* Sem escolha manual, cada caixa recebe o seu próprio ajuste: a tabela
+   larga encolhe e a estreita continua em tamanho normal. Com escolha
+   manual, o número vale para todas as caixas da aba. */
+function aplicarZoom(){
+  const manual = S.zoom[S.aba];
+  let menor = 1;
+  caixasDeZoom().forEach(cx=>{
+    const z = manual != null ? manual : zoomQueCabeEm(cx);
+    cx.style.zoom = z;
+    if(z < menor) menor = z;
+  });
+  const v = document.getElementById('zoomValor');
+  if(v) v.textContent = Math.round((manual != null ? manual : menor) * 100) + '%';
+  const ctrl = document.getElementById('zoomCtrl');
+  if(ctrl) ctrl.style.visibility = caixasDeZoom().length ? '' : 'hidden';
+  /* a folha mantém a barra de rolagem desenhada embaixo */
+  S.folha.zoom = manual != null ? manual : null;
+}
+
+/* nome antigo, ainda usado pela folha e pelos testes */
+function aplicarZoomFolha(){ aplicarZoom(); }
+
+function ligarZoom(){
   const b = id => document.getElementById(id);
   if(!b('zoomValor')) return;
-  /* na primeira vez que a aba abre, já entra no tamanho que cabe */
-  if(S.folha.zoom == null) S.folha.zoom = zoomQueCabe();
-  aplicarZoomFolha();
+  aplicarZoom();
   const mover = passo => {
-    const atual = S.folha.zoom || 1;
+    const atual = S.zoom[S.aba] != null ? S.zoom[S.aba]
+      : Math.min(1, ...caixasDeZoom().map(zoomQueCabeEm));
     const proximo = passo > 0 ? ZOOMS.find(z => z > atual + 0.001)
                               : ZOOMS.slice().reverse().find(z => z < atual - 0.001);
-    S.folha.zoom = proximo || (passo > 0 ? ZOOMS[ZOOMS.length-1] : ZOOMS[0]);
-    aplicarZoomFolha();
+    S.zoom[S.aba] = proximo || (passo > 0 ? ZOOMS[ZOOMS.length-1] : ZOOMS[0]);
+    aplicarZoom();
   };
   if(b('zoomMenos')) b('zoomMenos').onclick = ()=>mover(-1);
   if(b('zoomMais'))  b('zoomMais').onclick  = ()=>mover(1);
   if(b('zoomAjustar')) b('zoomAjustar').onclick = ()=>{
-    S.folha.zoom = zoomQueCabe();
-    aplicarZoomFolha();
-    toast(S.folha.zoom === 1 ? 'A tabela já cabe inteira na tela.'
-      : 'Tabela em ' + Math.round(S.folha.zoom*100) + '% — cabe inteira agora.');
+    S.zoom[S.aba] = null;              /* volta ao automático */
+    aplicarZoom();
+    const cabe = Math.min(1, ...caixasDeZoom().map(zoomQueCabeEm));
+    toast(cabe === 1 ? 'A tabela já cabe inteira na tela.'
+      : 'Tabela em ' + Math.round(cabe*100) + '% — cabe inteira agora.');
   };
 }
 
+/* nome antigo */
+function ligarZoomFolha(){ ligarZoom(); }
+
+/* A largura disponível muda quando a janela muda: reajusta o que está
+   no automático, sem mexer em quem escolheu um tamanho à mão. */
+let _tempoZoom = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(_tempoZoom);
+  _tempoZoom = setTimeout(()=>{ if(S.sessao) aplicarZoom(); }, 180);
+});
+
 function ligarFolha(){
-  ligarZoomFolha();
+  /* o zoom agora é ligado uma vez só, no fim de desenhar(), para todas as abas */
   document.querySelectorAll('.cel-folha').forEach(c=>{
     c.oninput = ()=>{
       const l = S.folha.linhas[c.dataset.f] || (S.folha.linhas[c.dataset.f] = {funcionarioId:c.dataset.f});
@@ -5552,7 +5781,10 @@ function ligarFolha(){
       const fil = S.filiais.find(f=>f.id===sel.dataset.filialGrupo);
       carregando(true);
       try{
-        await api('salvarFilial', {id:fil.id, nome:fil.nome, cnpj:fil.cnpj||'', grupo:sel.value});
+        /* semVr vai junto: o servidor regrava a linha inteira, e sem ele a
+           marcação de "não paga VR" se perderia ao trocar o grupo aqui */
+        await api('salvarFilial', {id:fil.id, nome:fil.nome, cnpj:fil.cnpj||'',
+          grupo:sel.value, semVr:fil.semVr||''});
         await recarregar();
         toast(fil.nome+' → '+(sel.value||'sem grupo'));
       }catch(e){ toast(e.message, true); }
@@ -5666,7 +5898,7 @@ async function salvarFolha(silencioso){
       funcionarioId:f.id, nome:f.nome, filial:f.filial, grupo:d.grupo,
       vtDiario:d.vtDiario, dias:d.dias, totalVt:moeda(d.totalVt),
       vrDiario:d.vrDiario, totalVr:moeda(d.totalVr),
-      vale: f.recebeVale==='NAO' ? '' : d.vale, observacoes:d.observacoes,
+      vale: d.vale, observacoes:d.observacoes,
       /* mexer só no VT ou no VR, sem tocar nos dias, também é um lançamento */
       _mexido: !!(l.dias || l.vale || l.observacoes || l.vtDiario || l.vrDiario)
     };
@@ -5720,13 +5952,13 @@ function tabelaFolha(){
     const d = linhaFolhaDe(f);
     return [f.nome, f.filial, d.grupo, d.vtDiario, d.dias, moeda(d.totalVt),
             d.vrDiario, moeda(d.totalVr),
-            f.recebeVale==='NAO' ? '' : d.vale,
-            f.recebeVale==='NAO' ? 'NÃO' : 'SIM', d.observacoes];
+            d.vale,
+            d.semVale ? 'NÃO' : 'SIM', d.observacoes];
   });
   const total = ['TOTAL','','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0)),
-    moeda(lista.reduce((s,f)=> s + (f.recebeVale==='NAO'?0:valorNum(linhaFolhaDe(f).vale)),0)), '', ''];
+    moeda(lista.reduce((s,f)=> s + valorNum(linhaFolhaDe(f).vale),0)), '', ''];
   return {cab, linhas, total};
 }
 
@@ -5742,8 +5974,8 @@ function tabelaFolhaUnida(){
     const l = S.cont.linhas[f.id] || {};
     return [f.nome, f.filial, d.grupo, d.vtDiario, d.dias, moeda(d.totalVt),
             d.vrDiario, moeda(d.totalVr),
-            f.recebeVale==='NAO' ? '' : d.vale,
-            f.recebeVale==='NAO' ? 'NÃO' : 'SIM']
+            d.vale,
+            d.semVale ? 'NÃO' : 'SIM']
       .concat(COLS_CONT.map(c=>l[c.campo]||''))
       .concat([l.observacoes || d.observacoes || '']);
   });
@@ -5751,7 +5983,7 @@ function tabelaFolhaUnida(){
     String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
     moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0)),
-    moeda(lista.reduce((s,f)=> s + (f.recebeVale==='NAO'?0:valorNum(linhaFolhaDe(f).vale)),0)), '']
+    moeda(lista.reduce((s,f)=> s + valorNum(linhaFolhaDe(f).vale),0)), '']
     .concat(COLS_CONT.map(c=>{
       const vals = lista.map(f=>(S.cont.linhas[f.id]||{})[c.campo]);
       return totalDaColuna(c, vals);
@@ -6018,7 +6250,7 @@ const COLS_CONT = [
   {campo:'faltas',     titulo:'FALTAS',            tipo:'datas',   puxa:true},
   {campo:'atrasos',    titulo:'ATRASOS',           tipo:'hora',    puxa:true},
   /* a antiga coluna COMISSÕES virou PREMIAÇÃO: é o mesmo valor, que vem
-     das metas batidas na aba Comissões */
+     das metas batidas na aba Premiação */
   {campo:'comissoes',  titulo:'PREMIAÇÃO',         tipo:'dinheiro',puxa:true},
   {campo:'vrAnterior', titulo:'VR MÊS ANTERIOR',   tipo:'dinheiro'},
   {campo:'vrAtual',    titulo:'VR MÊS ATUAL',      tipo:'dinheiro'},
@@ -6141,7 +6373,7 @@ function telaContabilidade(){
   <div class="aviso info">
     Fechamento de <b>${compBonita(S.competencia)}</b> · ${lista.length} funcionários ativos.
     As colunas em verde são preenchidas por outras abas — horas extras, adicional noturno,
-    faltas e atrasos vêm de Horas extras; comissões vêm de Comissões; quebra de produtos
+    faltas e atrasos vêm de Horas extras; a premiação vem de Premiação; quebra de produtos
     vem de Quebras. As demais são digitadas. Tudo pode ser corrigido à mão.
   </div>`;
 
