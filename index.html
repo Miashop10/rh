@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.20b';
+  const VERSAO_APP = '2026.10.21';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -176,6 +176,10 @@ select.campo,input.campo{
 .btn.perigo{background:var(--vermelho)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.mini{padding:6px 10px;font-size:12px}
+/* Os dois botões de vale andam juntos, um embaixo do outro: são a mesma
+   relação em dois formatos, e separados na fila ficariam longe um do outro. */
+.pilha-vale{display:flex;flex-direction:column;gap:6px;align-self:center}
+.pilha-vale .btn{width:100%;padding:7px 14px;font-size:12px;white-space:nowrap}
 /* Aviso de versão: aparece quando o navegador teima em servir o arquivo
    antigo mesmo depois de o sistema tentar buscar o novo. */
 #faixaVersao{
@@ -1283,6 +1287,8 @@ function enxugarCarga(d){
     sessao: d.sessao, filiais: d.filiais, usuarios: d.usuarios,
     funcionarios: d.funcionarios, documentos: d.documentos, prazos: d.prazos,
     calculos: d.calculos, grupos: d.grupos, avisos: d.avisos,
+    /* a folha vai junto para a aba também abrir pintada, e não em branco */
+    folha: d.folha, contabilidade: d.contabilidade,
     config: d.config, versao: d.versao
   };
 }
@@ -1658,6 +1664,26 @@ function aplicarCarga(d){
   S.he.calculos = d.calculos || [];
   S.avisos = d.avisos || [];
   S.grupos = d.grupos || [];
+  /* A folha e os lançamentos vêm junto com a carga, para a aba abrir na hora
+     em vez de pedir duas listas ao servidor, uma depois da outra.
+     Só são adotados quando ainda não há a folha desta competência na tela:
+     a conferência em segundo plano roda enquanto o RH digita, e trocar as
+     linhas por baixo apagaria o que ele acabou de lançar e ainda não salvou.
+     Quando não vêm (usuário sem a aba), carregarFolha e carregarContabilidade
+     continuam como caminho de reserva. */
+  if(d.folha && S.folha.competencia !== S.competencia){
+    S.folha.linhas = {};
+    d.folha.forEach(l=>{ S.folha.linhas[l.funcionarioId] = l; });
+    S.folha.competencia = S.competencia;
+  }
+  if(d.contabilidade && S.cont.competencia !== S.competencia){
+    S.cont.linhas = {};
+    (d.contabilidade.linhas||[]).forEach(l=>{ S.cont.linhas[l.funcionarioId] = l; });
+    S.cont.apuracoes = d.contabilidade.apuracoes || [];
+    S.cont.comissoes = d.contabilidade.comissoes || [];
+    S.cont.quebras = d.contabilidade.quebras || [];
+    S.cont.competencia = S.competencia;
+  }
   if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
   if(S.com.competencia && S.com.competencia !== S.competencia) S.com.competencia = null;
   if(S.qb.competencia && S.qb.competencia !== S.competencia) S.qb.competencia = null;
@@ -2028,8 +2054,12 @@ function barraFiltros(comBotao){
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
-    ${comBotao&&podeAprovar()?`<button class="btn sec" id="folhaVale"
-      title="Planilha em PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale do mês">Exportar vale</button>`:''}
+    ${comBotao&&podeAprovar()?`<div class="pilha-vale">
+      <button class="btn sec" id="folhaVale"
+        title="PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale do mês">Exportar vale</button>
+      <button class="btn sec" id="folhaValeExcel"
+        title="Planilha para lançar em outro sistema: nome, valor, filial, Vale e a data do pagamento">Exportar vale Excel</button>
+    </div>`:''}
     ${comBotao?'<button class="btn" id="btnNovo">Cadastrar funcionário</button>':''}
   </div>`;
 }
@@ -2292,6 +2322,7 @@ function ligarDelegacao(){
     if((el = alvo('#btnNovo')))           { abrirFuncionario(null); return; }
     if((el = alvo('#verExcluidos')))      { abrirExcluidos(); return; }
     if((el = alvo('#btnImportar')))       { abrirImportacao(); return; }
+    if((el = alvo('#folhaValeExcel')))    { exportarValeExcel(); return; }
     if((el = alvo('#folhaVale')))         { exportarValePdf(); return; }
     if((el = alvo('#verOpcionais')))      { abrirOpcionais(); return; }
     if((el = alvo('[data-pend]'))){
@@ -2736,8 +2767,9 @@ async function exportarFichaCadastro(f, ficha){
     campo('RG', d.rg);
     campo('Órgão', d.orgaoEmissor);
     campo('Expedição', dt(d.expedicao));
+    /* CTPS fica de fora da ficha impressa, a pedido do RH. O campo continua
+       no cadastro: o dado é guardado, só não é impresso aqui. */
     campo('P.I.S', d.pis);
-    campo('CTPS', d.ctps);
     fim();
 
     titulo('Contato');
@@ -6115,22 +6147,32 @@ function linhasDoVale(){
     .filter(x=>x.vale > 0);
 }
 
+/* Os botões de vale ficam na aba Funcionários, que não carrega a folha.
+   Sem isto a relação sairia com os valores do cadastro e ignoraria o que o
+   RH lançou no mês. */
+async function garantirFolhaDaCompetencia(){
+  if(S.folha.competencia === S.competencia) return true;
+  await carregarFolha();
+  /* outra parte da tela já podia estar buscando a mesma folha: espera ela */
+  for(let i=0; i<40 && S.folha.competencia !== S.competencia; i++){
+    await new Promise(r=>setTimeout(r, 150));
+  }
+  if(S.folha.competencia !== S.competencia){
+    toast('Não consegui buscar a folha de '+compBonita(S.competencia)+
+          '. Tente de novo.', true);
+    return false;
+  }
+  return true;
+}
+
+/* O vale é pago sempre no dia 20 da competência. */
+function diaDoPagamentoDoVale(comp){
+  return '20/' + comp.substring(5,7) + '/' + comp.substring(0,4);
+}
+
 async function exportarValePdf(){
   if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar o vale.', true);
-  /* O botão fica na aba Funcionários, que não carrega a folha. Sem isto a
-     relação sairia só com os valores de cadastro e ignoraria o que o RH
-     lançou no mês. */
-  if(S.folha.competencia !== S.competencia){
-    await carregarFolha();
-    /* outra parte da tela já podia estar buscando a mesma folha: espera ela */
-    for(let i=0; i<40 && S.folha.competencia !== S.competencia; i++){
-      await new Promise(r=>setTimeout(r, 150));
-    }
-    if(S.folha.competencia !== S.competencia){
-      return toast('Não consegui buscar a folha de '+compBonita(S.competencia)+
-                   '. Tente de novo.', true);
-    }
-  }
+  if(!await garantirFolhaDaCompetencia()) return;
   const itens = linhasDoVale();
   if(!itens.length){
     return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
@@ -6232,6 +6274,45 @@ async function exportarValePdf(){
       'VALE '+compArquivo(S.competencia)+sufixo+'.pdf');
     toast('Relação de vale gerada: '+itens.length+' funcionários, R$ '+moeda(totalGeral)+'.');
   }catch(e){ toast(e.message,true); }
+  finally{ carregando(false); }
+}
+
+/* ------------------------------------------------------------------
+   RELAÇÃO DE VALE EM EXCEL
+   Enxuta de propósito: é planilha para lançar em outro sistema, não
+   relatório para ler. Sem total e sem cabeçalho decorado, porque uma
+   linha a mais atrapalha quem importa o arquivo. O valor vai como
+   número — dá para somar e para colar — e a data como texto
+   dd/mm/aaaa, que é como os sistemas brasileiros esperam receber.
+   ------------------------------------------------------------------ */
+async function exportarValeExcel(){
+  if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar o vale.', true);
+  if(!await garantirFolhaDaCompetencia()) return;
+  const itens = linhasDoVale();
+  if(!itens.length){
+    return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
+  }
+  carregando(true);
+  try{
+    await usar('xlsx');
+    const data = diaDoPagamentoDoVale(S.competencia);
+    const cab = ['NOME','VALOR DO VALE','FILIAL','DESCRIÇÃO','DATA'];
+    const linhas = itens.map(({f, vale})=> [f.nome, vale, f.filial||'', 'Vale', data]);
+    const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
+    ws['!cols'] = [{wch:36},{wch:15},{wch:22},{wch:12},{wch:12}];
+    /* a coluna do dinheiro com duas casas, senão o Excel mostra 180 e 180,5 */
+    for(let i = 0; i < linhas.length; i++){
+      const cel = ws[XLSX.utils.encode_cell({r:i+1, c:1})];
+      if(cel) cel.z = '#,##0.00';
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'VALE');
+    const sufixo = S.filtroFilial==='TODAS' ? '' : ' '+S.filtroFilial;
+    XLSX.writeFile(wb, 'VALE '+compArquivo(S.competencia)+sufixo+'.xlsx');
+    const total = itens.reduce((s,x)=>s+x.vale, 0);
+    toast('Planilha de vale gerada: '+itens.length+' funcionários, R$ '+moeda(total)+
+          ', com data '+data+'.');
+  }catch(e){ toast(e.message, true); }
   finally{ carregando(false); }
 }
 
