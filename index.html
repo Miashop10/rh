@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.21d';
+  const VERSAO_APP = '2026.10.21g';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -196,6 +196,13 @@ select.campo,input.campo{
 .filial-topo{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--linha)}
 .filial-nome{font-weight:600;letter-spacing:.02em}
 .filial-qtd{font-size:11px;color:var(--apagado);letter-spacing:.1em;text-transform:uppercase}
+/* Na aba de anexar são dezesseis cabeçalhos destes numa tela só: em duas
+   linhas eles sozinhos comiam mil pixels. Aqui viram uma faixa fina, com o
+   nome e a contagem lado a lado. */
+.anexar-lista .filial-topo{padding:7px 16px;gap:10px}
+.anexar-lista .filial-nome{font-size:13px}
+.anexar-lista .filial-topo > div{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.anexar-lista section.filial{margin-bottom:10px}
 .semaforo{display:flex;height:6px;width:170px;border-radius:3px;overflow:hidden;background:#e6e9ed}
 .semaforo i{display:block;height:100%}
 .semaforo-legenda{font-size:11px;color:var(--apagado);display:flex;gap:10px;white-space:nowrap}
@@ -261,6 +268,10 @@ select.campo,input.campo{
   color:var(--apagado);font-size:13px;line-height:1;
 }
 .filho .f-tira:hover{background:#f6f7f9;color:var(--vermelho);border-color:var(--vermelho)}
+/* os cinco campos do uniforme numa faixa só: separados pela grade de duas
+   colunas do cadastro, ficariam espalhados e sem cara de conjunto */
+.grade-uniforme{display:grid;grid-template-columns:90px 1fr 110px 150px 110px;gap:10px}
+@media(max-width:860px){ .grade-uniforme{grid-template-columns:1fr 1fr} }
 @media(max-width:640px){ .filho{grid-template-columns:1fr 1fr 30px} .filho .f-nome{grid-column:1/-1} }
 textarea.entrada{min-height:70px;resize:vertical}
 
@@ -716,13 +727,52 @@ body.tela-larga .tab-unida .col-fixa{min-width:176px}
 }
 
 /* ---------- ANEXAR DOCUMENTOS ---------- */
+/* Uma linha por funcionário, tudo na mesma altura: nome, selos dos
+   documentos, a contagem e o botão. Antes o nome ficava numa linha e os
+   selos em outra, com 120px por pessoa — cabiam quatro nomes na tela e o
+   gerente rolava o tempo todo. A largura sobrava no meio; agora é ela que
+   leva os selos. */
 .linha-anexo{
-  display:grid;grid-template-columns:4px 1fr 60px 110px;align-items:center;gap:14px;
+  display:grid;grid-template-columns:4px minmax(190px,270px) 1fr 44px 84px;
+  align-items:center;gap:12px;
   padding:0 16px 0 0;border-bottom:1px solid #eef0f3;cursor:pointer;
 }
 .linha-anexo:last-child{border-bottom:none}
 .linha-anexo:hover{background:#fafbfc}
-.linha-anexo > div:nth-child(2){padding:12px 0}
+.linha-anexo .nome-anexo{
+  padding:7px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.linha-anexo .acoes .btn{padding:4px 10px;font-size:11px}
+/* classe própria: a ".cel" da interface de celular tem 90px de recuo embaixo
+   e vinha esticando esta linha inteira */
+.linha-anexo .conta-anexo{font-size:12px;color:var(--grafite);text-align:right}
+/* o marcador tem 52px mínimos pensados para a linha antiga, de duas alturas:
+   aqui ele acompanha a linha, senão era ele que mandava na altura */
+.linha-anexo .marcador{min-height:0}
+/* os selos não quebram linha: numa tela estreita eles rolam para o lado,
+   em vez de empurrar a lista inteira para baixo */
+.linha-anexo .pills{
+  flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;margin-top:0;
+  scrollbar-width:none;
+}
+.linha-anexo .pills::-webkit-scrollbar{display:none}
+/* ---------- CANDIDATOS EM TESTE ---------- */
+.tab-cand{width:100%;border-collapse:collapse;font-size:13px;min-width:1280px}
+.tab-cand th{
+  text-align:left;padding:8px 6px;font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--apagado);border-bottom:1px solid var(--linha);
+  white-space:nowrap;background:var(--cartao);position:sticky;top:0;z-index:2;
+}
+.tab-cand td{padding:3px 6px;border-bottom:1px solid #eef0f3;vertical-align:middle}
+.tab-cand .num{text-align:right}
+.tab-cand .num .entrada{text-align:right}
+.tab-cand .col-sel{width:32px;text-align:center}
+.tab-cand .entrada{padding:5px 7px;font-size:12.5px}
+.tab-cand tfoot td{
+  padding:8px 6px;border-top:1px solid var(--linha-forte);background:#fafbfc;
+  position:sticky;bottom:0;
+}
+.tab-cand .cand-total{font-weight:600}
 .pills{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
 .pill{
   font-size:10px;letter-spacing:.08em;font-weight:600;padding:3px 7px;border-radius:2px;
@@ -757,7 +807,19 @@ body.tela-larga .tab-unida .col-fixa{min-width:176px}
 .linha-tipo .entrada{max-width:none}
 .linha-tipo .entrada{flex:1;max-width:340px}
 @media(max-width:820px){
-  .linha-anexo{grid-template-columns:4px 1fr auto;padding-right:12px}
+  /* No telefone volta a empilhar: não há largura para os selos ao lado do
+     nome. Cada pedaço vai para a sua casa na grade — sem isso eles caem numa
+     segunda fila e a linha fica desmontada. */
+  .linha-anexo{grid-template-columns:4px 1fr auto;padding-right:12px;row-gap:0}
+  .linha-anexo .nome-anexo{white-space:normal;grid-column:2;grid-row:1;padding:9px 0 0}
+  .linha-anexo .pills{
+    grid-column:2;grid-row:2;flex-wrap:wrap;margin:5px 0 10px;overflow:visible;
+  }
+  .linha-anexo .marcador{grid-column:1;grid-row:1/3}
+  .linha-anexo .acoes{grid-column:3;grid-row:1/3}
+  /* a contagem sai: com todos os selos à vista ela não diz nada de novo,
+     e ocupava uma terceira fila na grade */
+  .linha-anexo .conta-anexo{display:none}
 }
 
 /* ---------- IMPORTAÇÃO ---------- */
@@ -1135,6 +1197,7 @@ const S = {
   competencia: hojeCompetencia(),
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, excluidos:[], pendAberta:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{}, cacheDocs:{},
+  candidatos:[], candSel:new Set(),
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
   grupos:[],
@@ -1156,7 +1219,8 @@ const ROTULO_ABA = {
   QUEBRAS:'Quebras',
   FOLHA:'Folha de pagamento',
   VT_VR:'VT/VR',
-  AVISO_PREVIO:'Aviso prévio'
+  AVISO_PREVIO:'Aviso prévio',
+  CANDIDATOS:'Candidatos em teste'
 };
 
 /* ==================================================================
@@ -1285,7 +1349,7 @@ function enxugarCarga(d){
   return {
     sessao: d.sessao, filiais: d.filiais, usuarios: d.usuarios,
     funcionarios: d.funcionarios, documentos: d.documentos, prazos: d.prazos,
-    calculos: d.calculos, grupos: d.grupos, avisos: d.avisos,
+    calculos: d.calculos, grupos: d.grupos, avisos: d.avisos, candidatos: d.candidatos,
     /* a folha vai junto para a aba também abrir pintada, e não em branco */
     folha: d.folha, contabilidade: d.contabilidade,
     config: d.config, versao: d.versao
@@ -1704,6 +1768,7 @@ function aplicarCarga(d){
   S.versaoServidor = d.versao || '';
   S.he.calculos = d.calculos || [];
   S.avisos = d.avisos || [];
+  S.candidatos = d.candidatos || [];
   S.grupos = d.grupos || [];
   /* A folha e os lançamentos vêm junto com a carga, para a aba abrir na hora
      em vez de pedir duas listas ao servidor, uma depois da outra.
@@ -2047,6 +2112,7 @@ function desenhar(){
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   else if(S.aba==='VT_VR') c.innerHTML = telaVtVr();
   else if(S.aba==='AVISO_PREVIO') c.innerHTML = telaAvisoPrevio();
+  else if(S.aba==='CANDIDATOS') c.innerHTML = telaCandidatos();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
   if(S.aba==='HORAS_EXTRAS') ligarHorasExtras();
@@ -2055,6 +2121,7 @@ function desenhar(){
   if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
   if(S.aba==='VT_VR') ligarVtVr();
   if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
+  if(S.aba==='CANDIDATOS') ligarCandidatos();
   /* por último: mede a tabela já montada e encolhe o que não couber */
   ligarZoom();
 
@@ -2543,7 +2610,8 @@ function confirmarExclusao(funcId){
 const CAMPOS_FICHA = ['horarioTrabalho','salario','conducoesIda','conducoesVolta',
   'rg','orgaoEmissor','expedicao','pis','ctps','nascimento','escolaridade',
   'filhosMenores14','nomePai','nomeMae','etnia','endereco','celular','email',
-  'estadoCivil','filhos','uniforme','uniformeData'];
+  'estadoCivil','filhos','uniforme','uniformeData',
+  'uniformeQtd','uniformeDescricao','uniformeTamanho','uniformeValor'];
 
 /* Campos que não são um input só e por isso não entram pelo caminho comum
    de ler "#fi_<campo>.value": a lista de filhos é montada e lida à parte. */
@@ -2692,9 +2760,24 @@ function camposDaFicha(d){
         <option value="NAO" ${d.uniforme==='NAO'?'selected':''}>Não</option>
         <option value="SIM" ${d.uniforme==='SIM'?'selected':''}>Sim</option>
       </select></div>
-    <div id="boxUniformeData" style="display:none">
-      <label class="campo-lbl" for="fi_uniformeData">Recebimento do uniforme</label>
-      <input class="entrada" type="date" id="fi_uniformeData" value="${v('uniformeData')}"></div>`;
+    <div id="boxUniformeData" style="display:none" class="full">
+      <div class="grade-uniforme">
+        <div><label class="campo-lbl" for="fi_uniformeQtd">Quantidade</label>
+          <input class="entrada mono" type="number" min="0" step="1" id="fi_uniformeQtd"
+                 value="${v('uniformeQtd')}"></div>
+        <div><label class="campo-lbl" for="fi_uniformeDescricao">Descrição</label>
+          <input class="entrada" id="fi_uniformeDescricao" value="${v('uniformeDescricao')}"
+                 placeholder="Ex.: Camisetas novas"></div>
+        <div><label class="campo-lbl" for="fi_uniformeTamanho">Tamanho</label>
+          <input class="entrada" id="fi_uniformeTamanho" value="${v('uniformeTamanho')}"
+                 placeholder="M, G, 42…"></div>
+        <div><label class="campo-lbl" for="fi_uniformeData">Data de entrega</label>
+          <input class="entrada" type="date" id="fi_uniformeData" value="${v('uniformeData')}"></div>
+        <div><label class="campo-lbl" for="fi_uniformeValor">Valor de cada</label>
+          <input class="entrada mono" id="fi_uniformeValor" value="${v('uniformeValor')}"
+                 placeholder="35,00"></div>
+      </div>
+    </div>`;
 }
 
 /* Busca a ficha e troca o bloco pelos campos preenchidos. Enquanto não
@@ -2710,7 +2793,7 @@ async function carregarFicha(el, id){
     caixa.innerHTML = camposDaFicha(d);
     ligarCamposDaFicha(el);
     el._fichaPronta = true;
-    ['#fFicha','#fLgpd'].forEach(q=>{
+    ['#fFicha','#fLgpd','#fRecibo'].forEach(q=>{
       const b = el.querySelector(q);
       if(b) b.disabled = false;
     });
@@ -3121,6 +3204,240 @@ async function exportarTermoLGPD(f, ficha){
   finally{ carregando(false); }
 }
 
+/* ------------------------------------------------------------------
+   RECIBO DE ENTREGA DE UNIFORMES
+   Reproduz o documento que o RH já usava no Word: o texto, a tabela de
+   sete colunas e as três linhas em branco embaixo — que existem de
+   propósito, para anotar à mão uma segunda peça ou a devolução.
+   ------------------------------------------------------------------ */
+async function exportarReciboUniforme(f, ficha){
+  const d = ficha || {};
+  if(d.uniforme !== 'SIM'){
+    return toast('Marque "Uniforme: Sim" no cadastro antes de gerar o recibo.', true);
+  }
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.TimesRoman);
+    const fonteB = await doc.embedFont(StandardFonts.TimesRomanBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+    const L = 595.28, A = 841.89, m = 56;
+    const LARG = L - 2*m;
+    const tinta = rgb(.06,.07,.08), risco = rgb(.1,.1,.12);
+    const pg = doc.addPage([L,A]);
+    let y = A - 64;
+
+    const hLogo = 26;
+    pg.drawImage(logo, {x:m, y:y-hLogo, width: logo.width*hLogo/logo.height, height:hLogo});
+    y -= hLogo + 24;
+
+    const tit = 'RECIBO DE ENTREGA DE UNIFORMES';
+    pg.drawText(tit, {x:(L - fonteB.widthOfTextAtSize(tit, 13))/2, y, size:13,
+      font:fonteB, color:tinta});
+    y -= 30;
+
+    /* O parágrafo mistura texto normal e negrito na mesma linha, então é
+       montado pedaço a pedaço, medindo cada um para saber quando quebrar. */
+    const cnpj = (S.filiais.find(x=>x.nome===f.filial)||{}).cnpj || '';
+    const pedacos = [
+      {t:'Eu, ', b:false}, {t:(f.nome||'').toUpperCase(), b:true},
+      {t:', portador do CPF: ', b:false}, {t:f.cpf || '____________________', b:false},
+      {t:', declaro ter recebido da empresa ', b:false}, {t:EMPRESA_LGPD, b:true},
+      {t:', inscrita no ', b:false},
+      {t:'CNPJ sob o n. º ' + (cnpj || '____________________'), b:true},
+      {t:', o uniforme abaixo discriminado, me comprometendo a utilizá-los somente para '+
+         'fins laborais durante toda a jornada de trabalho e devolvê-lo no término do '+
+         'contrato de trabalho, sob pena de que o não o fazer ser enquadrado em punições '+
+         'disciplinares.', b:false}
+    ];
+    const TAM = 10.5;
+    let x = m;
+    pedacos.forEach(p=>{
+      const fnt = p.b ? fonteB : fonte;
+      p.t.split(' ').forEach((palavra, i, todas)=>{
+        const txt = palavra + (i < todas.length-1 ? ' ' : '');
+        const w = fnt.widthOfTextAtSize(txt, TAM);
+        if(x + w > m + LARG){ x = m; y -= 17; }
+        pg.drawText(txt, {x, y, size:TAM, font:fnt, color:tinta});
+        x += w;
+      });
+    });
+    y -= 36;
+
+    /* ---- tabela ---- */
+    const cab = ['Quantidade','Descrição','Tamanho','Data Entrega','Data Devolução',
+                 'Assinatura','Valor'];
+    const prop = [0.13, 0.17, 0.11, 0.14, 0.14, 0.15, 0.16];
+    const lg = prop.map(p=>LARG*p);
+    const xs = []; let acc = m;
+    lg.forEach(w=>{ xs.push(acc); acc += w; });
+    const fim = acc;
+
+    const noMeio = (txt, i, yy, fnt, tam)=>{
+      const t = String(txt==null?'':txt);
+      if(!t) return;
+      pg.drawText(t, {x: xs[i] + (lg[i] - fnt.widthOfTextAtSize(t, tam))/2, y:yy,
+        size:tam, font:fnt, color:tinta});
+    };
+    const moldura = (topo, baixo)=>{
+      pg.drawLine({start:{x:m,y:topo}, end:{x:fim,y:topo}, thickness:.8, color:risco});
+      pg.drawLine({start:{x:m,y:baixo}, end:{x:fim,y:baixo}, thickness:.8, color:risco});
+      xs.concat([fim]).forEach(px=>
+        pg.drawLine({start:{x:px,y:topo}, end:{x:px,y:baixo}, thickness:.8, color:risco}));
+    };
+
+    /* cabeçalho */
+    let topo = y + 12;
+    noMeio.call(null, '', 0, 0, fonte, 9);
+    cab.forEach((c,i)=> noMeio(c, i, y, fonteB, 8.5));
+    let baixo = y - 7;
+    moldura(topo, baixo);
+
+    /* linha do item: a descrição pode ocupar duas linhas, como no modelo */
+    const qtd = String(d.uniformeQtd || '').trim();
+    const valorCada = valorNum(d.uniformeValor);
+    const desc = (d.uniformeDescricao || '').trim();
+    const linhasDesc = [];
+    { let atual = '';
+      desc.split(' ').filter(Boolean).forEach(p=>{
+        const tenta = atual ? atual + ' ' + p : p;
+        if(atual && fonte.widthOfTextAtSize(tenta, 9.5) > lg[1] - 8){ linhasDesc.push(atual); atual = p; }
+        else atual = tenta;
+      });
+      if(atual) linhasDesc.push(atual);
+    }
+    const alturaItem = Math.max(34, 14 + linhasDesc.length*12);
+    topo = baixo;
+    y = topo - 16;
+    noMeio(qtd, 0, y, fonte, 9.5);
+    noMeio(d.uniformeTamanho, 2, y, fonte, 9.5);
+    noMeio(d.uniformeData ? dataBonita(d.uniformeData) : '', 3, y, fonte, 9.5);
+    noMeio(valorCada ? 'R$ ' + moeda(valorCada) + ' cada' : '', 6, y, fonte, 9.5);
+    linhasDesc.forEach((ln,k)=> noMeio(ln, 1, y - k*12, fonte, 9.5));
+    baixo = topo - alturaItem;
+    moldura(topo, baixo);
+
+    /* três linhas em branco, para anotar à mão */
+    for(let i=0; i<3; i++){
+      topo = baixo; baixo = topo - 17;
+      moldura(topo, baixo);
+    }
+
+    /* total */
+    topo = baixo; baixo = topo - 17;
+    const total = valorCada * (parseFloat(qtd.replace(',', '.')) || 0);
+    if(total) noMeio('R$ ' + moeda(total), 6, topo - 12, fonte, 9.5);
+    moldura(topo, baixo);
+    y = baixo - 28;
+
+    /* ---- texto do pé ---- */
+    const paragrafo = txt=>{
+      let linha = '';
+      txt.split(' ').forEach(p=>{
+        const tenta = linha ? linha + ' ' + p : p;
+        if(linha && fonte.widthOfTextAtSize(tenta, TAM) > LARG){
+          pg.drawText(linha, {x:m, y, size:TAM, font:fonte, color:tinta});
+          y -= 17; linha = p;
+        } else linha = tenta;
+      });
+      if(linha){ pg.drawText(linha, {x:m, y, size:TAM, font:fonte, color:tinta}); y -= 17; }
+    };
+    paragrafo('O uniforme deverá ser utilizado pelo período indeterminado conforme ordem '+
+      'de seu superior, podendo ser prorrogado o uso de acordo com seu estado de conservação.');
+    y -= 14;
+    paragrafo('Obs.: Caso a vida útil do uniforme não resista ao prazo estabelecido, seja '+
+      'por mau uso, extravio, ou motivos não justificáveis, a empresa se reserva o direito '+
+      'de descontar do funcionário, seja em folha de pagamento ou em rescisão o valor '+
+      'equivalente a aquisição da vestimenta.');
+
+    y -= 40;
+    pg.drawText('Curitiba, _____ / _____ / _____',
+      {x:m, y, size:TAM, font:fonte, color:tinta});
+    y -= 56;
+    pg.drawText('______________________', {x:m, y, size:TAM, font:fonte, color:tinta});
+    y -= 15;
+    pg.drawText((f.nome||'').toUpperCase(), {x:m, y, size:TAM, font:fonteB, color:tinta});
+
+    baixar(new Blob([await doc.save()], {type:'application/pdf'}),
+      'RECIBO DE UNIFORME - ' + (f.nome||'FUNCIONARIO') + '.pdf');
+    toast('Recibo de entrega de uniformes gerado.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+/* ------------------------------------------------------------------
+   VALOR POR EXTENSO
+   Num recibo o número e a escrita precisam bater sempre, então isto foi
+   conferido contra vinte casos — inclusive o do modelo do RH.
+   ------------------------------------------------------------------ */
+
+const EXT_UNI = ['','um','dois','três','quatro','cinco','seis','sete','oito','nove'];
+const EXT_10_19 = ['dez','onze','doze','treze','catorze','quinze','dezesseis',
+  'dezessete','dezoito','dezenove'];
+const EXT_DEZENAS = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta',
+  'oitenta','noventa'];
+const EXT_CENTENAS = ['','cento','duzentos','trezentos','quatrocentos','quinhentos',
+  'seiscentos','setecentos','oitocentos','novecentos'];
+
+/* escreve um grupo de 1 a 999 */
+function extGrupo(n){
+  if(n === 100) return 'cem';
+  const c = Math.floor(n/100), resto = n % 100;
+  const d = Math.floor(resto/10), u = resto % 10;
+  const partes = [];
+  if(c) partes.push(EXT_CENTENAS[c]);
+  if(resto >= 10 && resto <= 19) partes.push(EXT_10_19[resto-10]);
+  else {
+    if(d) partes.push(EXT_DEZENAS[d]);
+    if(u) partes.push(EXT_UNI[u]);
+  }
+  return partes.join(' e ');
+}
+
+const EXT_ESCALAS = [
+  {s:1e9, um:'bilhão', varios:'bilhões'},
+  {s:1e6, um:'milhão', varios:'milhões'},
+  {s:1e3, um:'mil', varios:'mil'}
+];
+
+function porExtenso(n){
+  n = Math.floor(Math.abs(n));
+  if(n === 0) return 'zero';
+  const partes = [];
+  let resto = n;
+  EXT_ESCALAS.forEach(e=>{
+    const q = Math.floor(resto / e.s);
+    if(!q) return;
+    resto -= q * e.s;
+    const nome = q === 1 ? e.um : e.varios;
+    /* "mil" não leva "um" na frente: mil reais, não um mil reais */
+    partes.push({v:q, t: e.s === 1e3 && q === 1 ? 'mil' : extGrupo(q) + ' ' + nome});
+  });
+  if(resto) partes.push({v:resto, t:extGrupo(resto)});
+
+  /* O "e" entra quando o pedaço seguinte é redondo ou menor que cem:
+     "mil e duzentos", "um milhão e quinhentos mil", "dez mil e quinhentos" —
+     mas "mil duzentos e cinquenta", que já tem o seu próprio "e". */
+  return partes.reduce((texto, p, i)=>{
+    if(!i) return p.t;
+    const juntaComE = p.v < 100 || p.v % 100 === 0;
+    return texto + (juntaComE ? ' e ' : ' ') + p.t;
+  }, '');
+}
+
+function reaisPorExtenso(v){
+  const centavos = Math.round(Math.abs(v) * 100);
+  const reais = Math.floor(centavos / 100);
+  const cent = centavos % 100;
+  const parteReais = reais ? porExtenso(reais) + (reais === 1 ? ' real' : ' reais') : '';
+  const parteCent = cent ? porExtenso(cent) + (cent === 1 ? ' centavo' : ' centavos') : '';
+  if(parteReais && parteCent) return parteReais + ' e ' + parteCent;
+  return parteReais || parteCent || 'zero real';
+}
+
+
 function abrirFuncionario(id, extra){
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
@@ -3208,6 +3525,8 @@ function abrirFuncionario(id, extra){
       ${id && podeAprovar() ? `
       <button class="btn sec" id="fFicha" disabled
         title="Gera a ficha de cadastro em PDF com os dados desta tela">Exportar Ficha de Cadastro</button>
+      <button class="btn sec" id="fRecibo" disabled
+        title="Gera o recibo de entrega de uniformes com os dados preenchidos no cadastro">Recibo de entrega de uniformes</button>
       <button class="btn sec" id="fLgpd" disabled
         title="Gera o termo de consentimento LGPD preenchido com os dados deste funcionário">Exportar Termo LGPD</button>`:''}
       <button class="btn sec" id="fCancelar">Cancelar</button>
@@ -3261,6 +3580,8 @@ function abrirFuncionario(id, extra){
   };
   const bFicha = el.querySelector('#fFicha');
   if(bFicha) bFicha.onclick = ()=> exportarFichaCadastro(dadosDaTela(), fichaDaTela());
+  const bRecibo = el.querySelector('#fRecibo');
+  if(bRecibo) bRecibo.onclick = ()=> exportarReciboUniforme(dadosDaTela(), fichaDaTela());
   const bLgpd = el.querySelector('#fLgpd');
   if(bLgpd) bLgpd.onclick = ()=> exportarTermoLGPD(dadosDaTela(), fichaDaTela());
 
@@ -4398,7 +4719,7 @@ function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
   const opsFil = ['<option value="">Todas</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','CANDIDATOS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -4833,6 +5154,312 @@ function pessoasEmAviso(){
     /* quem termina o aviso primeiro aparece primeiro: é a fila de trabalho */
     .sort((a,b)=> (a.av.terminoAviso||'9999').localeCompare(b.av.terminoAviso||'9999')
                   || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+}
+
+/* ==================================================================
+   ABA CANDIDATOS EM TESTE
+   Quem está fazendo teste e ainda não foi registrado. Não é funcionário:
+   não tem pasta no Drive, nem documento obrigatório, nem folha. Aqui fica
+   só o que o RH precisa para pagar o dia e dar o recibo.
+   ================================================================== */
+function candidatosDaTela(){
+  const b = S.busca.trim().toUpperCase();
+  return (S.candidatos || [])
+    .filter(c=> S.filtroFilial==='TODAS' || c.filial===S.filtroFilial)
+    .filter(c=> !b || String(c.nome||'').toUpperCase().includes(b))
+    .sort((a,c)=> (a.filial||'').localeCompare(c.filial||'','pt-BR',{numeric:true})
+                  || String(a.nome||'').localeCompare(String(c.nome||''),'pt-BR'));
+}
+
+function totalDoCandidato(c){
+  return valorNum(c.vr) + valorNum(c.vt) + valorNum(c.diaria);
+}
+
+function telaCandidatos(){
+  const lista = candidatosDaTela();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+      S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar candidato pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <button class="btn sec" id="candRecibo">Exportar Recibo</button>
+    <button class="btn sec" id="candExcel">Excel</button>
+    <button class="btn" id="candNovo">Adicionar candidato</button>
+  </div>
+  <div class="aviso info">
+    Quem está em teste e ainda <b>não foi registrado</b>. O <b>total</b> é a soma de
+    VR, VT e diária, e é ele que vai no recibo. Marque os candidatos e clique em
+    <b>Exportar Recibo</b> para gerar o recibo de cada um.
+  </div>`;
+
+  if(!lista.length){
+    return html + vazio('Nenhum candidato em teste',
+      'Clique em Adicionar candidato para incluir quem está fazendo teste.');
+  }
+
+  const total = lista.reduce((t,c)=>t+totalDoCandidato(c), 0);
+  html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
+    <table class="tab-cand"><thead><tr>
+      <th class="col-sel"><input type="checkbox" id="candTodos" title="Marcar todos"></th>
+      <th>Nome</th><th>PIX</th><th>CPF</th>
+      <th class="num">VR</th><th class="num">VT</th><th class="num">Diária</th>
+      <th class="num">Total</th>
+      <th>Descrição</th><th>Filial</th><th>Observações</th><th></th>
+    </tr></thead><tbody>`;
+
+  lista.forEach(c=>{
+    const campo = (nome, largura, extra) => `<input class="entrada cel-cand${extra||''}"
+      data-cand="${c.id}" data-campo="${nome}" value="${esc(c[nome]||'')}"
+      style="min-width:${largura}px">`;
+    html += `<tr data-cand-linha="${c.id}">
+      <td class="col-sel"><input type="checkbox" class="cand-sel" data-sel="${c.id}"
+        ${S.candSel.has(c.id)?'checked':''}></td>
+      <td>${campo('nome', 190)}</td>
+      <td>${campo('pix', 150)}</td>
+      <td>${campo('cpf', 120, ' mono')}</td>
+      <td class="num">${campo('vr', 74, ' dinheiro mono')}</td>
+      <td class="num">${campo('vt', 74, ' dinheiro mono')}</td>
+      <td class="num">${campo('diaria', 80, ' dinheiro mono')}</td>
+      <td class="num mono cand-total" data-total="${c.id}">${moeda(totalDoCandidato(c))}</td>
+      <td>${campo('descricao', 170)}</td>
+      <td><select class="entrada cel-cand" data-cand="${c.id}" data-campo="filial"
+             style="min-width:130px">
+        <option value="">—</option>
+        ${S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+          c.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`).join('')}
+      </select></td>
+      <td>${campo('observacoes', 170)}</td>
+      <td style="text-align:right"><button class="link-acao rem"
+        data-cand-excluir="${c.id}">Excluir</button></td>
+    </tr>`;
+  });
+
+  html += `</tbody><tfoot><tr>
+      <td></td><td><b>TOTAL</b></td><td></td><td></td>
+      <td class="num mono">${moeda(lista.reduce((t,c)=>t+valorNum(c.vr),0))}</td>
+      <td class="num mono">${moeda(lista.reduce((t,c)=>t+valorNum(c.vt),0))}</td>
+      <td class="num mono">${moeda(lista.reduce((t,c)=>t+valorNum(c.diaria),0))}</td>
+      <td class="num mono"><b id="candTotalGeral">${moeda(total)}</b></td>
+      <td colspan="4"></td>
+    </tr></tfoot></table></div></div>`;
+  return html;
+}
+
+function ligarCandidatos(){
+  const b = id => document.getElementById(id);
+
+  /* grava ao sair do campo: digitar não pode ir à nuvem a cada tecla */
+  document.querySelectorAll('.cel-cand').forEach(campo=>{
+    campo.dataset.antes = campo.value;
+    const gravar = async ()=>{
+      if(campo.value === campo.dataset.antes) return;
+      const id = campo.dataset.cand;
+      const c = S.candidatos.find(x=>x.id===id);
+      if(!c) return;
+      if(campo.classList.contains('dinheiro') && campo.value.trim()){
+        campo.value = moeda(valorNum(campo.value));
+      }
+      const antes = c[campo.dataset.campo];
+      c[campo.dataset.campo] = campo.value;
+      atualizarTotalCandidato(id);
+      try{
+        await api('salvarCandidato', {candidato:c}, {silencioso:true});
+        campo.dataset.antes = campo.value;
+      }catch(e){
+        c[campo.dataset.campo] = antes;
+        campo.value = antes || '';
+        atualizarTotalCandidato(id);
+        toast(e.message, true);
+      }
+    };
+    campo.onblur = gravar;
+    if(campo.tagName === 'SELECT') campo.onchange = gravar;
+    /* o total acompanha enquanto digita, sem esperar o salvamento */
+    campo.oninput = ()=>{
+      const c = S.candidatos.find(x=>x.id===campo.dataset.cand);
+      if(!c) return;
+      c[campo.dataset.campo] = campo.value;
+      atualizarTotalCandidato(campo.dataset.cand);
+    };
+  });
+
+  document.querySelectorAll('.cand-sel').forEach(x=> x.onchange = ()=>{
+    if(x.checked) S.candSel.add(x.dataset.sel); else S.candSel.delete(x.dataset.sel);
+    const todos = b('candTodos');
+    const marcados = document.querySelectorAll('.cand-sel:checked').length;
+    const total = document.querySelectorAll('.cand-sel').length;
+    if(todos){ todos.checked = marcados === total; todos.indeterminate = marcados > 0 && marcados < total; }
+  });
+  if(b('candTodos')) b('candTodos').onchange = ()=>{
+    const marcar = b('candTodos').checked;
+    document.querySelectorAll('.cand-sel').forEach(x=>{
+      x.checked = marcar;
+      if(marcar) S.candSel.add(x.dataset.sel); else S.candSel.delete(x.dataset.sel);
+    });
+  };
+
+  document.querySelectorAll('[data-cand-excluir]').forEach(x=> x.onclick = async ()=>{
+    const c = S.candidatos.find(y=>y.id===x.dataset.candExcluir);
+    if(!confirm('Excluir ' + ((c&&c.nome) || 'este candidato') + ' da lista?')) return;
+    carregando(true);
+    try{
+      await api('excluirCandidato', {id:x.dataset.candExcluir});
+      S.candidatos = S.candidatos.filter(y=>y.id!==x.dataset.candExcluir);
+      S.candSel.delete(x.dataset.candExcluir);
+      desenhar();
+      toast('Candidato excluído.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  });
+
+  if(b('candNovo')) b('candNovo').onclick = async ()=>{
+    const nome = (prompt('Nome do candidato em teste:') || '').trim();
+    if(!nome) return;
+    carregando(true);
+    try{
+      const filial = S.sessao.papel === 'GERENTE' ? (S.sessao.filial || '')
+        : (S.filtroFilial !== 'TODAS' ? S.filtroFilial : '');
+      const r = await api('salvarCandidato', {candidato:{nome, filial}});
+      S.candidatos.push({id:r.id, nome:nome.toUpperCase(), filial,
+        cpf:'', pix:'', vr:'', vt:'', diaria:'', descricao:'', observacoes:''});
+      desenhar();
+      toast('Candidato incluído. Preencha os valores na linha.');
+    }catch(e){ toast(e.message, true); }
+    finally{ carregando(false); }
+  };
+
+  if(b('candRecibo')) b('candRecibo').onclick = exportarReciboCandidatos;
+  if(b('candExcel')) b('candExcel').onclick = exportarCandidatosExcel;
+}
+
+function atualizarTotalCandidato(id){
+  const c = S.candidatos.find(x=>x.id===id);
+  const cel = document.querySelector(`[data-total="${id}"]`);
+  if(c && cel) cel.textContent = moeda(totalDoCandidato(c));
+  const geral = document.getElementById('candTotalGeral');
+  if(geral) geral.textContent = moeda(candidatosDaTela().reduce((t,x)=>t+totalDoCandidato(x),0));
+}
+
+/* ------------------------------------------------------------------
+   RECIBO DOS CANDIDATOS EM TESTE
+   Uma folha por candidato marcado, no formato que o RH já usava: o
+   texto com nome, CPF, empresa e CNPJ da filial, o total por extenso e,
+   embaixo, uma linha por verba — VR, VT e diária — com a descrição.
+   ------------------------------------------------------------------ */
+async function exportarReciboCandidatos(){
+  const sel = candidatosDaTela().filter(c=>S.candSel.has(c.id));
+  if(!sel.length){
+    return toast('Marque ao menos um candidato para gerar o recibo.', true);
+  }
+  const semValor = sel.filter(c=>totalDoCandidato(c) <= 0);
+  if(semValor.length && !confirm(
+      semValor.length + ' candidato(s) sem valor nenhum preenchido:\n\n' +
+      semValor.slice(0,10).map(c=>'· ' + c.nome).join('\n') +
+      '\n\nGerar assim mesmo?')){
+    return;
+  }
+
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+    const L = 595.28, A = 841.89, m = 70;
+    const LARG = L - 2*m;
+    const tinta = rgb(.06,.07,.08);
+
+    sel.forEach(c=>{
+      const pg = doc.addPage([L,A]);
+      let y = A - 70;
+      const hLogo = 30;
+      pg.drawImage(logo, {x:m, y:y-hLogo, width: logo.width*hLogo/logo.height, height:hLogo});
+      y -= hLogo + 26;
+
+      pg.drawText('RECIBO', {x:(L - fonteB.widthOfTextAtSize('RECIBO', 15))/2, y,
+        size:15, font:fonteB, color:tinta});
+      y -= 28;
+
+      /* o parágrafo mistura normal e negrito, então vai pedaço a pedaço */
+      const total = totalDoCandidato(c);
+      const cnpj = (S.filiais.find(x=>x.nome===c.filial)||{}).cnpj || '';
+      const TAM = 10.5;
+      const pedacos = [
+        {t:'Eu, ', b:false}, {t:(c.nome||'').toUpperCase(), b:true},
+        {t:', portador(a) do CPF n° ' + (c.cpf || '____________________'), b:false},
+        {t:', recebi da empresa ', b:false}, {t:EMPRESA_LGPD, b:true},
+        {t:' inscrita no CNPJ sob o n° ' + (cnpj || '____________________'), b:false},
+        {t:' a importância de ', b:false},
+        {t:'R$ ' + moeda(total) + ' (' + reaisPorExtenso(total) + ')', b:true},
+        {t:' referente:', b:false}
+      ];
+      let x = m;
+      pedacos.forEach(p=>{
+        const fnt = p.b ? fonteB : fonte;
+        p.t.split(' ').forEach((palavra, i, todas)=>{
+          const txt = palavra + (i < todas.length-1 ? ' ' : '');
+          const w = fnt.widthOfTextAtSize(txt, TAM);
+          if(x + w > m + LARG){ x = m; y -= 18; }
+          pg.drawText(txt, {x, y, size:TAM, font:fnt, color:tinta});
+          x += w;
+        });
+      });
+      y -= 44;
+
+      /* uma linha por verba preenchida, com a descrição do candidato */
+      const desc = (c.descricao || '').trim();
+      [['VR', c.vr], ['VT', c.vt], ['Diária', c.diaria]].forEach(([rotulo, valor])=>{
+        const v = valorNum(valor);
+        if(!v) return;
+        const linha = rotulo + ' R$ ' + moeda(v) + (desc ? ' – ' + desc : '') + ';';
+        pg.drawText(linha, {x:m, y, size:TAM, font:fonte, color:tinta});
+        y -= 19;
+      });
+
+      y -= 40;
+      /* reaproveita a data do termo LGPD, que já vem com a cidade e o ponto */
+      pg.drawText(dataPorExtenso(new Date().toISOString().substring(0,10)),
+        {x:m, y, size:TAM, font:fonte, color:tinta});
+      y -= 70;
+      pg.drawText('___________________________', {x:m, y, size:TAM, font:fonte, color:tinta});
+      y -= 16;
+      pg.drawText((c.nome||'').toUpperCase(), {x:m, y, size:TAM, font:fonteB, color:tinta});
+    });
+
+    const nome = sel.length === 1
+      ? 'RECIBO - ' + (sel[0].nome || 'CANDIDATO') + '.pdf'
+      : 'RECIBOS CANDIDATOS EM TESTE.pdf';
+    baixar(new Blob([await doc.save()], {type:'application/pdf'}),
+      nome.replace(/[\\\/:*?"<>|]/g,'-'));
+    toast(sel.length === 1 ? 'Recibo gerado.' : sel.length + ' recibos gerados.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+
+async function exportarCandidatosExcel(){
+  const lista = candidatosDaTela();
+  if(!lista.length) return toast('Não há candidatos para exportar.', true);
+  await usar('xlsx');
+  const cab = ['NOME','PIX','CPF','VR','VT','DIÁRIA','TOTAL','DESCRIÇÃO','FILIAL','OBSERVAÇÕES'];
+  const linhas = lista.map(c=>[c.nome, c.pix, c.cpf, valorNum(c.vr), valorNum(c.vt),
+    valorNum(c.diaria), totalDoCandidato(c), c.descricao, c.filial, c.observacoes]);
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
+  ws['!cols'] = [{wch:32},{wch:20},{wch:16},{wch:11},{wch:11},{wch:11},{wch:12},
+                 {wch:26},{wch:20},{wch:26}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'CANDIDATOS');
+  XLSX.writeFile(wb, 'CANDIDATOS EM TESTE '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada com ' + lista.length + ' candidatos.');
 }
 
 function telaAvisoPrevio(){
@@ -7144,6 +7771,7 @@ function telaAnexar(){
       ${faltamTudo? faltamTudo+' com documento faltando' : 'tudo anexado neste mês'}</span>
   </div>`;
 
+  html += '<div class="anexar-lista">';
   porFilial.forEach(g=>{
     const faltando = g.lista.filter(f=>situacao(f)==='vermelho').length;
     html += `
@@ -7158,6 +7786,7 @@ function telaAnexar(){
       ${g.lista.map(f=>linhaAnexo(f, tiposDe(f))).join('')}
     </section>`;
   });
+  html += '</div>';
 
   if(podeAprovar()) html += painelTipos();
   return html;
@@ -7189,11 +7818,10 @@ function linhaAnexo(f, tipos){
   <div class="linha-anexo${faixa?' '+faixa.classe:''}" data-docs="${f.id}"${
       faixa?` title="${esc(faixa.titulo)}"`:''}>
     <div class="marcador m-${cor}"></div>
-    <div>
-      <div class="nome c-${cor}" style="padding:0">${esc(f.nome)}${seloExperiencia(f)}</div>
-      <div class="pills">${pills}</div>
-    </div>
-    <div class="cel mono esconde-mob" style="text-align:right">${anexados}/${tipos.length}</div>
+    <div class="nome nome-anexo c-${cor}" title="${esc(f.nome)}"
+      >${esc(f.nome)}${seloExperiencia(f)}</div>
+    <div class="pills">${pills}</div>
+    <div class="conta-anexo mono esconde-mob">${anexados}/${tipos.length}</div>
     <div class="acoes"><button class="btn sec mini" tabindex="-1">Anexar</button></div>
   </div>`;
 }
