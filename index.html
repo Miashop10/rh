@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.21g';
+  const VERSAO_APP = '2026.10.21h';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1960,9 +1960,10 @@ function podeImportar(){ return podeAprovar(); }
 /* Gerente de loja anexa só no mês corrente; RH e master anexam em qualquer um.
    O servidor recusa do mesmo jeito — isto aqui é para não oferecer um botão
    que vai dar erro. */
-function podeAnexarNaCompetencia(){
-  return S.sessao.papel !== 'GERENTE' || S.competencia === hojeCompetencia();
-}
+/* Qualquer competência pode receber anexo, de qualquer usuário: o documento
+   de um mês quase sempre chega no mês seguinte, e prender o gerente ao mês
+   corrente deixava a loja sem como anexar. */
+function podeAnexarNaCompetencia(){ return true; }
 
 /* ==================================================================
    AVISO DE DOCUMENTO OPCIONAL
@@ -2037,13 +2038,10 @@ function abrirOpcionais(){
   return el;
 }
 
-function prazoDaCompetencia(){
-  const p = S.prazos.find(x=>x.competencia===S.competencia);
-  if(p) return p.dataLimite;
-  const a=+S.competencia.substring(0,4), m=+S.competencia.substring(5,7);
-  const prox = new Date(a, m, Math.min(+S.config.diaLimite||10, 28));
-  return prox.toISOString().substring(0,10);
-}
+/* O prazo para anexar foi retirado a pedido do RH: não havia data que
+   valesse para as dezesseis lojas, e a cobrança é feita pela cor do nome e
+   pela aba Pendências, que mostram o que falta a qualquer momento. A coluna
+   na planilha continua lá, sem uso, para não mexer no histórico. */
 
 /* ==================================================================
    DESENHO
@@ -2192,7 +2190,7 @@ function telaFuncionarios(){
   const exp2 = ativos.filter(f=>{const e=experiencia(f); return e && e.fase===2;}).length;
 
   html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
-    <span>Competência <b>${compBonita(S.competencia)}</b> · prazo <b>${dataBonita(prazoDaCompetencia())}</b></span>
+    <span>Competência <b>${compBonita(S.competencia)}</b></span>
     <span style="margin-left:auto;display:flex;gap:14px;font-size:12px">
       <span style="color:var(--vermelho)"><b>${cont.vermelho}</b> falta documento</span>
       <span style="color:var(--ambar)"><b>${cont.ambar}</b> a conferir</span>
@@ -2337,7 +2335,7 @@ function telaPendencias(){
   const tipos = S.config.tiposObrigatorios;
   const filiais = [...new Set(ativos.map(f=>f.filial))].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
   let html = `<div class="aviso info">Faltas por filial na competência <b>${compBonita(S.competencia)}</b> ·
-    prazo até <b>${dataBonita(prazoDaCompetencia())}</b> · clique numa filial para ver quem está devendo</div>`;
+    clique numa filial para ver quem está devendo</div>`;
   if(!filiais.length) return html + vazio('Sem dados','Cadastre funcionários para acompanhar as pendências.');
 
   html += `<div class="painel"><table class="matriz"><thead><tr>
@@ -3797,8 +3795,8 @@ function desenharDocs(el){
         <div class="campo-lbl" style="margin:0 0 2px">Competência</div>
         <div class="mono" style="font-size:16px;font-weight:700">${compBonita(comp)}</div>
       </div>
-      <div class="prazo">Prazo para anexar: <b>${dataBonita(prazoDaCompetencia())}</b><br>
-        Filial <b>${esc(f.filial)}</b> · Admissão <b>${dataBonita(f.dataAdmissao)}</b></div>
+      <div class="prazo">Filial <b>${esc(f.filial)}</b><br>
+        Admissão <b>${dataBonita(f.dataAdmissao)}</b></div>
       <div style="margin-left:auto" class="prazo">
         <b>${S.docsLista.length}</b> documento${S.docsLista.length===1?'':'s'} no total ·
         <b>${doMes.length}</b> em ${compBonita(comp)}${outros.length
@@ -4567,7 +4565,6 @@ function abrirAdmin(){
       <div class="sub-abas">
         <button class="sub-aba on" data-sub="filiais">Filiais</button>
         <button class="sub-aba" data-sub="usuarios">Usuários</button>
-        <button class="sub-aba" data-sub="prazos">Prazos</button>
         ${ehMaster()?'<button class="sub-aba" data-sub="senha">Senha master</button>':''}
       </div>
       <div id="subCorpo"></div>
@@ -4648,36 +4645,6 @@ function subAdmin(el, qual){
       ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'ANEXAR', ativo:'SIM'}, true)}
       </tbody></table>`;
     ligarUsuarios(c, el, qual);
-  }
-
-  if(qual==='prazos'){
-    const lista = S.prazos.slice().sort((a,b)=>b.competencia.localeCompare(a.competencia));
-    c.innerHTML = `
-      <div class="aviso info">Sem data específica, o prazo é o dia <b>${esc(S.config.diaLimite)}</b> do mês seguinte à competência.</div>
-      <div class="barra">
-        <div><label class="campo-lbl">Dia padrão do mês seguinte</label>
-          <input class="entrada" type="number" min="1" max="28" id="diaLimite" value="${esc(S.config.diaLimite)}" style="width:110px"></div>
-        <button class="btn sec" id="salvarDia" style="align-self:flex-end">Salvar dia padrão</button>
-      </div>
-      <div class="barra">
-        <div><label class="campo-lbl">Competência</label><input class="entrada" type="month" id="pComp" value="${S.competencia}"></div>
-        <div><label class="campo-lbl">Data limite específica</label><input class="entrada" type="date" id="pData"></div>
-        <button class="btn" id="addPrazo" style="align-self:flex-end">Definir prazo</button>
-      </div>
-      <table class="lista"><thead><tr><th>Competência</th><th>Prazo</th><th></th></tr></thead><tbody>
-      ${lista.map(p=>`<tr><td class="mono">${compBonita(p.competencia)}</td><td class="mono">${dataBonita(p.dataLimite)}</td>
-        <td style="text-align:right"><button class="link-acao rem" data-prazo="${p.competencia}">Remover</button></td></tr>`).join('')
-        || '<tr><td colspan="3" style="color:var(--apagado)">Nenhum prazo específico definido.</td></tr>'}
-      </tbody></table>`;
-    c.querySelector('#salvarDia').onclick = async ()=>
-      acao('salvarConfig',{diaLimite:c.querySelector('#diaLimite').value}, el, qual, 'Dia padrão salvo.');
-    c.querySelector('#addPrazo').onclick = async ()=>{
-      const comp=c.querySelector('#pComp').value, data=c.querySelector('#pData').value;
-      if(!comp||!data) return toast('Informe a competência e a data limite.', true);
-      await acao('salvarPrazo',{competencia:comp, dataLimite:data}, el, qual, 'Prazo definido.');
-    };
-    c.querySelectorAll('[data-prazo]').forEach(b=> b.onclick = ()=>
-      acao('excluirPrazo',{competencia:b.dataset.prazo}, el, qual, 'Prazo removido.'));
   }
 
   if(qual==='senha'){
@@ -5415,15 +5382,20 @@ async function exportarReciboCandidatos(){
       });
       y -= 44;
 
-      /* uma linha por verba preenchida, com a descrição do candidato */
-      const desc = (c.descricao || '').trim();
+      /* Uma linha por verba preenchida. A descrição vem uma vez só, embaixo:
+         repetida em VR, VT e diária ela só enchia o recibo de texto igual. */
       [['VR', c.vr], ['VT', c.vt], ['Diária', c.diaria]].forEach(([rotulo, valor])=>{
         const v = valorNum(valor);
         if(!v) return;
-        const linha = rotulo + ' R$ ' + moeda(v) + (desc ? ' – ' + desc : '') + ';';
-        pg.drawText(linha, {x:m, y, size:TAM, font:fonte, color:tinta});
+        pg.drawText(rotulo + ' R$ ' + moeda(v) + ';', {x:m, y, size:TAM, font:fonte, color:tinta});
         y -= 19;
       });
+      const desc = (c.descricao || '').trim();
+      if(desc){
+        y -= 8;
+        pg.drawText(desc, {x:m, y, size:TAM, font:fonte, color:tinta});
+        y -= 19;
+      }
 
       y -= 40;
       /* reaproveita a data do termo LGPD, que já vem com a cidade e o ponto */
@@ -7738,7 +7710,7 @@ function telaAnexar(){
     </div>
   </div>
   ${podeAnexarNaCompetencia() ? `<div class="aviso info">
-    Anexe os documentos de <b>${compBonita(S.competencia)}</b> até <b>${dataBonita(prazoDaCompetencia())}</b>.
+    Anexe os documentos de <b>${compBonita(S.competencia)}</b>.
     ${S.sessao.papel==='GERENTE'&&S.sessao.filial?` Você anexa os documentos da filial <b>${esc(S.sessao.filial)}</b>.`:''}
   </div>` : `<div class="aviso erro">
     <b>${compBonita(S.competencia)}</b> não está aberta para anexar. Você anexa documentos
