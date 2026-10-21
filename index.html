@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.21b';
+  const VERSAO_APP = '2026.10.21d';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -176,10 +176,9 @@ select.campo,input.campo{
 .btn.perigo{background:var(--vermelho)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.mini{padding:6px 10px;font-size:12px}
-/* Os dois botões de vale andam juntos, um embaixo do outro: são a mesma
-   relação em dois formatos, e separados na fila ficariam longe um do outro. */
-.pilha-vale{display:flex;flex-direction:column;gap:6px;align-self:center}
-.pilha-vale .btn{width:100%;padding:7px 14px;font-size:12px;white-space:nowrap}
+/* Os dois botões de vale são a mesma relação em dois formatos: ficam lado a
+   lado, menores que os demais, para não disputarem a atenção com o Cadastrar. */
+.barra .btn.mini{white-space:nowrap}
 /* Aviso de versão: aparece quando o navegador teima em servir o arquivo
    antigo mesmo depois de o sistema tentar buscar o novo. */
 #faixaVersao{
@@ -1512,6 +1511,10 @@ async function entrar(){
     /* arquivo velho no navegador: busca o novo agora, antes de desenhar nada.
        É aqui que dá para recarregar sem risco — ninguém digitou nada ainda. */
     if(conferirVersao(r.versao, true)) return;
+    /* E confere o próprio arquivo, que é o que pega as atualizações de tela.
+       Depois da tela montada e sem segurar nada: se houver versão nova, a
+       página se recarrega sozinha em um ou dois segundos. */
+    setTimeout(conferirArquivoPublicado, 1500);
     /* Quando a tela já foi pintada com a carga guardada, redesenhar só faz
        sentido se algo mudou de verdade — senão o gerente que já começou a
        digitar perderia o que escreveu por causa de um redesenho inútil. */
@@ -1605,6 +1608,44 @@ function conferirVersao(doServidor, podeRecarregar){
     mas a publicada é a <b>${esc(doServidor)}</b>. Enquanto isso, as novidades
     não aparecem aqui.`, true);
   return false;
+}
+
+/* ------------------------------------------------------------------
+   CONFERÊNCIA PELO PRÓPRIO ARQUIVO
+   A comparação acima só enxerga quando o Apps Script muda. Só que a
+   maioria das atualizações é só de tela: o Codigo.gs fica igual, o
+   index.html novo sobe para o GitHub e o navegador continua servindo
+   o antigo do seu cache — sem nada que avise.
+
+   Aqui o sistema busca o próprio arquivo com um carimbo na ponta (que
+   fura qualquer cache) e lê a versão que está escrita dentro dele. Se
+   a publicada for mais nova que a desta aba, recarrega uma vez. Roda
+   em segundo plano, depois da tela montada, uma vez por sessão.
+   ------------------------------------------------------------------ */
+async function conferirArquivoPublicado(){
+  /* Arquivo aberto direto do disco (file://) não tem versão publicada com
+     que comparar, e o fetch nem é permitido aí. */
+  if(location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  try{
+    const r = await fetch(location.pathname + '?v=' + Date.now(), {cache:'no-store'});
+    if(!r.ok) return;
+    const texto = await r.text();
+    const m = /const VERSAO_APP = '([^']+)'/.exec(texto);
+    if(!m) return;
+    const publicada = m[1];
+    if(publicada === VERSAO_APP || publicada < VERSAO_APP) return;
+    let jaTentou = '';
+    try{ jaTentou = sessionStorage.getItem(CHAVE_RECARGA) || ''; }catch(e){}
+    if(jaTentou === publicada){
+      /* já tentou e voltou o mesmo arquivo velho: avisa em vez de insistir */
+      avisarVersao(`Este navegador está com a versão <b>${esc(VERSAO_APP)}</b>,
+        mas a publicada é a <b>${esc(publicada)}</b>. Enquanto isso, as novidades
+        não aparecem aqui.`, true);
+      return;
+    }
+    try{ sessionStorage.setItem(CHAVE_RECARGA, publicada); }catch(e){}
+    location.replace(location.pathname + '?v=' + Date.now() + location.hash);
+  }catch(e){ /* sem rede ou arquivo fora do ar: não é motivo para atrapalhar */ }
 }
 
 function avisarVersao(texto, comBotao){
@@ -2054,12 +2095,11 @@ function barraFiltros(comBotao){
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
-    ${comBotao&&podeAprovar()?`<div class="pilha-vale">
-      <button class="btn sec" id="folhaVale"
+    ${comBotao&&podeAprovar()?`
+      <button class="btn sec mini" id="folhaVale"
         title="PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale do mês">Exportar vale</button>
-      <button class="btn sec" id="folhaValeExcel"
-        title="Planilha para lançar em outro sistema: nome, valor, filial, Vale e a data do pagamento">Exportar vale Excel</button>
-    </div>`:''}
+      <button class="btn sec mini" id="folhaValeExcel"
+        title="Planilha para lançar em outro sistema: nome, valor, filial, Vale e a data do pagamento">Exportar vale excel</button>`:''}
     ${comBotao?'<button class="btn" id="btnNovo">Cadastrar funcionário</button>':''}
   </div>`;
 }
