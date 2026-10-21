@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.21';
+  const VERSAO_APP = '2026.10.21b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -6297,7 +6297,10 @@ async function exportarValeExcel(){
     await usar('xlsx');
     const data = diaDoPagamentoDoVale(S.competencia);
     const cab = ['NOME','VALOR DO VALE','FILIAL','DESCRIÇÃO','DATA'];
-    const linhas = itens.map(({f, vale})=> [f.nome, vale, f.filial||'', 'Vale', data]);
+    /* O valor sai negativo: nesta planilha o vale é saída de dinheiro, e é
+       assim que o sistema de destino espera receber. No PDF, que é para
+       conferir e assinar, ele continua positivo. */
+    const linhas = itens.map(({f, vale})=> [f.nome, -vale, f.filial||'', 'Vale', data]);
     const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
     ws['!cols'] = [{wch:36},{wch:15},{wch:22},{wch:12},{wch:12}];
     /* a coluna do dinheiro com duas casas, senão o Excel mostra 180 e 180,5 */
