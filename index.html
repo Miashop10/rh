@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.21h';
+  const VERSAO_APP = '2026.10.22';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -362,6 +362,9 @@ textarea.entrada{min-height:70px;resize:vertical}
 #visor .visor-topo small{color:#9aa3ad;font-size:12px}
 #visor .visor-area{flex:1;display:grid;place-items:center;padding:0 18px 18px;overflow:auto}
 #visor img{max-width:100%;max-height:100%;object-fit:contain;background:#fff}
+/* o giro é só de visualização: o arquivo no Drive continua como foi enviado */
+#visor img, #visor iframe{transition:transform .18s ease}
+#visor .visor-girar{font-size:17px;line-height:1;padding:7px 11px}
 #visor iframe{width:100%;height:100%;border:none;background:#fff}
 #visor .visor-palco{width:100%;height:100%;display:grid;place-items:center}
 /* contador e setas: percorrer a pasta do funcionário sem fechar o visor */
@@ -1964,6 +1967,25 @@ function podeImportar(){ return podeAprovar(); }
    de um mês quase sempre chega no mês seguinte, e prender o gerente ao mês
    corrente deixava a loja sem como anexar. */
 function podeAnexarNaCompetencia(){ return true; }
+
+/* Gerente sem nenhum funcionário quase nunca é uma loja vazia: é o cadastro
+   dele apontando para uma filial que mudou de nome ou foi excluída. Dizer
+   isso é muito melhor do que "nenhum funcionário", que manda o RH procurar
+   no lugar errado. */
+function chaveFilial(n){
+  return String(n==null?'':n).normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toUpperCase().replace(/\s+/g,' ').trim();
+}
+function problemaDeFilial(){
+  if(!S.sessao || S.sessao.papel !== 'GERENTE') return '';
+  const minha = chaveFilial(S.sessao.filial);
+  if(!minha) return 'O seu usuário está sem filial. Peça ao RH para informar a filial no seu cadastro.';
+  if(!S.filiais.some(f=>chaveFilial(f.nome) === minha)){
+    return 'O seu usuário está ligado à filial "' + (S.sessao.filial||'') +
+      '", que não existe mais na lista de filiais. Peça ao RH para corrigir a filial no seu cadastro.';
+  }
+  return '';
+}
 
 /* ==================================================================
    AVISO DE DOCUMENTO OPCIONAL
@@ -4363,6 +4385,10 @@ async function verDocumento(id){
       <div id="vTitulo" style="min-width:0"></div>
       <span class="visor-cont" id="vConta"></span>
       <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn sec visor-girar" id="vGirarEsq"
+          title="Girar para a esquerda (tecla E)" aria-label="Girar para a esquerda">↺</button>
+        <button class="btn sec visor-girar" id="vGirar"
+          title="Girar para a direita (tecla R)" aria-label="Girar para a direita">↻</button>
         ${podeAprovar()?'<button class="btn sec" id="vPdf">Exportar PDF</button>':''}
         <button class="btn sec" id="vFechar">Fechar</button>
       </div>
@@ -4377,6 +4403,41 @@ async function verDocumento(id){
   const palco = v.querySelector('#vPalco');
   const bAnt = v.querySelector('#vAnt'), bProx = v.querySelector('#vProx');
   let pedido = 0;
+
+  /* ---- giro ----
+     Foto tirada de lado é o caso mais comum: o gerente fotografa o holerite
+     deitado e quem confere lê de pescoço torto. O giro é só visual, não mexe
+     no arquivo guardado no Drive. Cada documento começa em pé, e o giro fica
+     guardado enquanto o visor estiver aberto — quem girou o cartão ponto de
+     um mês costuma precisar do mesmo giro no do mês seguinte. */
+  const giros = {};
+  let giroAtual = 0;
+  const aplicarGiro = ()=>{
+    const alvo = palco.querySelector('img, iframe');
+    if(!alvo) return;
+    const deitado = giroAtual % 180 !== 0;
+    /* deitado, a altura do palco é que limita a largura da imagem, e vice-versa:
+       sem trocar os limites a imagem girada sai pelas bordas */
+    const l = palco.clientWidth, a = palco.clientHeight;
+    if(alvo.tagName === 'IMG'){
+      alvo.style.maxWidth = (deitado ? a : l) + 'px';
+      alvo.style.maxHeight = (deitado ? l : a) + 'px';
+    }else{
+      alvo.style.width = (deitado ? a : l) + 'px';
+      alvo.style.height = (deitado ? l : a) + 'px';
+    }
+    alvo.style.transform = 'rotate(' + giroAtual + 'deg)';
+  };
+  const girar = passo =>{
+    giroAtual = (giroAtual + passo + 360) % 360;
+    giros[fila[i]] = giroAtual;
+    aplicarGiro();
+  };
+  v.querySelector('#vGirar').onclick = ()=>girar(90);
+  v.querySelector('#vGirarEsq').onclick = ()=>girar(-90);
+  /* a janela mudando de tamanho muda os limites de quem está deitado */
+  const aoRedimensionar = ()=>aplicarGiro();
+  window.addEventListener('resize', aoRedimensionar);
 
   const mostrar = async (n)=>{
     if(n < 0 || n >= fila.length) return;
@@ -4407,16 +4468,30 @@ async function verDocumento(id){
     palco.innerHTML = d.mimeType==='application/pdf'
       ? `<iframe src="${url}"></iframe>`
       : `<img src="${url}" alt="${esc(d.tipo)}">`;
+    /* o giro escolhido para este documento volta; os outros começam em pé */
+    giroAtual = giros[d.id] || 0;
+    const alvo = palco.querySelector('img, iframe');
+    if(alvo && alvo.tagName === 'IMG' && !alvo.complete){
+      /* só dá para medir depois que a imagem carregou */
+      alvo.onload = aplicarGiro;
+    }
+    aplicarGiro();
     /* adianta o seguinte: a seta responde na hora quando for usada */
     const seg = S.docsLista.find(x=>x.id===fila[i+1]);
     if(seg) urlArquivo(seg.id).catch(()=>{});
   };
 
-  const fechar = ()=>{ v.remove(); document.removeEventListener('keydown', tecla); };
+  const fechar = ()=>{
+    v.remove();
+    document.removeEventListener('keydown', tecla);
+    window.removeEventListener('resize', aoRedimensionar);
+  };
   function tecla(e){
     if(e.key==='Escape') fechar();
     else if(e.key==='ArrowRight') mostrar(i+1);
     else if(e.key==='ArrowLeft') mostrar(i-1);
+    else if(e.key==='r' || e.key==='R') girar(90);
+    else if(e.key==='e' || e.key==='E') girar(-90);
   }
   v.querySelector('#vFechar').onclick = fechar;
   bAnt.onclick = ()=>mostrar(i-1);
@@ -7405,9 +7480,11 @@ function telaCelular(){
            autocomplete="off" enterkeyhint="search"></div>`;
 
   if(!lista.length){
+    const problema = problemaDeFilial();
     html += `<div class="cel-vazio">${S.busca.trim()
       ? 'Ninguém com esse nome.'
-      : 'Nenhum funcionário na sua filial. Fale com o RH.'}</div></div>`;
+      : (problema ? esc(problema) : 'Nenhum funcionário na sua filial. Fale com o RH.')
+      }</div></div>`;
     return html;
   }
 
@@ -7719,8 +7796,11 @@ function telaAnexar(){
   </div>`}`;
 
   if(!ativos.length){
-    html += vazio('Nenhum funcionário nesta filial',
-      'Fale com o RH para incluir os funcionários da sua loja no sistema.');
+    const problema = problemaDeFilial();
+    html += problema
+      ? vazio('Filial não encontrada', problema)
+      : vazio('Nenhum funcionário nesta filial',
+          'Fale com o RH para incluir os funcionários da sua loja no sistema.');
     if(podeAprovar()) html += painelTipos();
     return html;
   }
