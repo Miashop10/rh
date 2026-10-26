@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.22';
+  const VERSAO_APP = '2026.10.26';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1963,10 +1963,10 @@ function podeImportar(){ return podeAprovar(); }
 /* Gerente de loja anexa só no mês corrente; RH e master anexam em qualquer um.
    O servidor recusa do mesmo jeito — isto aqui é para não oferecer um botão
    que vai dar erro. */
-/* Qualquer competência pode receber anexo, de qualquer usuário: o documento
-   de um mês quase sempre chega no mês seguinte, e prender o gerente ao mês
-   corrente deixava a loja sem como anexar. */
-function podeAnexarNaCompetencia(){ return true; }
+/* Não há mais mês fechado para anexar: o documento de um mês quase sempre
+   chega no mês seguinte, e prender o gerente ao mês corrente deixava a loja
+   sem como anexar. O código que recusava foi retirado inteiro, e não apenas
+   desligado — enquanto a mensagem existisse no arquivo, ela podia voltar. */
 
 /* Gerente sem nenhum funcionário quase nunca é uma loja vazia: é o cadastro
    dele apontando para uma filial que mudou de nome ou foi excluída. Dizer
@@ -3850,7 +3850,7 @@ function desenharDocs(el){
       <div class="card-doc falta">
         <div class="card-doc-topo"><span class="ponto" style="background:#c8ccd3"></span><span class="card-doc-tipo">OUTRO</span></div>
         <div class="miniatura sem">Documento avulso</div>
-        <div class="card-doc-pe">${podeAnexarNaCompetencia()?
+        <div class="card-doc-pe">${true?
           '<button class="link-acao" id="addOutro">+ Adicionar</button>':''}</div>
       </div>
     </div></div></div>`;
@@ -3909,7 +3909,7 @@ function cardDoc(tipo, docs, f, opcional, outroMes){
         <span class="ponto ${opcional?'p-neutro':'p-vermelho'}"></span>
         <span class="card-doc-tipo">${esc(tipo)}</span></div>
       <div class="miniatura sem">${opcional?'Opcional':'Não anexado'}</div>
-      <div class="card-doc-pe">${outroMes || !podeAnexarNaCompetencia() ? '' :
+      <div class="card-doc-pe">${outroMes ? '' :
         `<button class="link-acao" data-anexar="${esc(tipo)}">+ Anexar</button>`}</div>
     </div>`;
   }
@@ -3939,7 +3939,7 @@ function cardDoc(tipo, docs, f, opcional, outroMes){
         <button class="arq-x" data-excluir="${d.id}" title="Excluir este arquivo">✕</button>
       </span>`).join('')}</div>`:''}
     <div class="card-doc-pe">
-      ${outroMes || !podeAnexarNaCompetencia() ? '' :
+      ${outroMes ? '' :
         `<button class="link-acao" data-anexar="${esc(tipo)}">+ Arquivo</button>`}
       ${podeAprovar() ? (todosAprovados
           ? `<button class="link-acao" data-reprovar="${ids.join(',')}">Reabrir</button>`
@@ -7455,8 +7455,6 @@ function telaCelular(){
   const todos = S.funcionarios.filter(f=>f.status!=='DEMITIDO');
   const prontos = todos.filter(f=>situacao(f)!=='vermelho').length;
   const pct = todos.length ? Math.round(prontos/todos.length*100) : 0;
-  const aberto = podeAnexarNaCompetencia();
-
   let html = `<div class="cel">
     <div class="cel-capa">
       <div class="cel-capa-topo">
@@ -7468,12 +7466,6 @@ function telaCelular(){
         todos.length-prontos ? ` · <span style="color:var(--vermelho);font-weight:600">${
           todos.length-prontos} ${todos.length-prontos===1?'falta':'faltam'}</span>` : ''}</div>
     </div>`;
-
-  if(!aberto){
-    html += `<div class="cel-fechado"><b>${compBonita(S.competencia)}</b> está fechado para
-      anexar. Você anexa no mês atual, <b>${compBonita(hojeCompetencia())}</b>.
-      Para corrigir um mês fechado, fale com o RH.</div>`;
-  }
 
   html += `<div class="cel-busca">
     <input id="celBusca" placeholder="Buscar pelo nome" value="${esc(S.busca)}"
@@ -7569,30 +7561,24 @@ function desenharFichaCelular(el){
   const opcionais = (S.config.tiposOpcionais||[]).filter(t=>!tipos.includes(t));
   const extras = [...new Set(meus.filter(d=>!tipos.includes(d.tipo) && !opcionais.includes(d.tipo))
                                  .map(d=>d.tipo))];
-  const aberto = podeAnexarNaCompetencia();
-
   let html = '<div class="cel">';
-  if(!aberto){
-    html += `<div class="cel-fechado">Mês fechado para anexar. Você anexa em
-      <b>${compBonita(hojeCompetencia())}</b>.</div>`;
-  }
   html += '<div class="cel-grupo">Documentos do mês</div>';
-  tipos.forEach(t=> html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t), aberto));
+  tipos.forEach(t=> html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t)));
 
   if(opcionais.length || extras.length){
     html += '<div class="cel-grupo">Outros documentos</div>';
     opcionais.concat(extras).forEach(t=>
-      html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t), aberto, true));
+      html += linhaDocCelular(f, t, meus.filter(d=>d.tipo===t), true));
   }
-  if(aberto){
-    html += `<button class="cel-bt" id="celOutro" style="width:100%;margin-top:4px">
-      + Outro documento</button>`;
-  }
+  html += `<button class="cel-bt" id="celOutro" style="width:100%;margin-top:4px">
+    + Outro documento</button>`;
   el.querySelector('#celCorpo').innerHTML = html + '</div>';
   ligarFichaCelular(el);
 }
 
-function linhaDocCelular(f, tipo, docs, aberto, opcional){
+function linhaDocCelular(f, tipo, docs, opcional){
+  const aberto = true;      /* não há mais mês fechado; o nome fica para não
+                               reescrever a linha inteira sem necessidade */
   const env = _envioCel[chaveEnvio(f.id, tipo)];
   const temArquivo = docs.length > 0;
   const aprovado = temArquivo && docs.every(d=>d.status==='APROVADO');
@@ -7786,14 +7772,10 @@ function telaAnexar(){
              style="width:170px">
     </div>
   </div>
-  ${podeAnexarNaCompetencia() ? `<div class="aviso info">
+  <div class="aviso info">
     Anexe os documentos de <b>${compBonita(S.competencia)}</b>.
     ${S.sessao.papel==='GERENTE'&&S.sessao.filial?` Você anexa os documentos da filial <b>${esc(S.sessao.filial)}</b>.`:''}
-  </div>` : `<div class="aviso erro">
-    <b>${compBonita(S.competencia)}</b> não está aberta para anexar. Você anexa documentos
-    apenas na competência atual, <b>${compBonita(hojeCompetencia())}</b> — volte o mês no
-    campo acima. Para corrigir um mês fechado, fale com o RH.
-  </div>`}`;
+  </div>`;
 
   if(!ativos.length){
     const problema = problemaDeFilial();
