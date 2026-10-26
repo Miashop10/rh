@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.26';
+  const VERSAO_APP = '2026.10.26b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1040,6 +1040,10 @@ body.celular #conteudo{padding:0}
 }
 .cel-recado{font-size:12.5px;color:var(--apagado);margin-top:8px;word-break:break-word}
 .cel-recado.erro{color:var(--vermelho);font-weight:600}
+/* usuário apontando para filial inexistente, ou para uma filial sem gente */
+.campo-erro{border-color:var(--vermelho) !important;background:var(--vermelho-suave)}
+.conta-filial{font-size:11px;color:var(--apagado);margin-top:4px}
+.conta-filial.zero{color:var(--vermelho);font-weight:600}
 .cel-fechado{
   background:var(--ambar-suave);border:1px solid var(--ambar);color:#7a5308;
   border-radius:3px;padding:11px 13px;font-size:13px;margin-bottom:12px;
@@ -4715,6 +4719,7 @@ function subAdmin(el, qual){
       só a aba <b>Anexar documentos</b>: ele verá apenas os funcionários da própria loja.<br>
       As senhas ficam à mostra nesta tela, aberta só pelo MASTER e pelo Gerente RH —
       evite deixá-la aberta com outras pessoas por perto.</div>
+      ${avisoGerentesSemGente()}
       <table class="lista"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>Abas visíveis</th><th></th></tr></thead><tbody id="tbUsers">
       ${S.usuarios.map(u=>linhaUsuario(u)).join('')}
       ${linhaUsuario({id:'', usuario:'', senha:'', papel:'GERENTE', filial:'', abas:'ANEXAR', ativo:'SIM'}, true)}
@@ -4757,10 +4762,42 @@ function subAdmin(el, qual){
   }
 }
 
+/* Gerente cuja filial não casa com a de nenhum funcionário entra no sistema
+   e não vê ninguém — sem erro, sem aviso, sem nada. Aqui o RH vê isso de
+   cima, em vez de procurar linha por linha. */
+function gerentesSemGente(){
+  return (S.usuarios||[]).filter(u=>
+    u.papel === 'GERENTE' && u.ativo !== 'NAO' && u.filial &&
+    !S.funcionarios.some(f=>chaveFilial(f.filial) === chaveFilial(u.filial)));
+}
+
+function avisoGerentesSemGente(){
+  const maus = gerentesSemGente();
+  if(!maus.length) return '';
+  return `<div class="aviso erro"><b>${maus.length} ${maus.length===1
+      ? 'gerente entra no sistema e não vê nenhum funcionário'
+      : 'gerentes entram no sistema e não veem nenhum funcionário'}:</b>
+    ${maus.map(u=>esc(u.usuario) + ' (filial “' + esc(u.filial) + '”)').join(', ')}.
+    A filial do usuário precisa ser a mesma dos funcionários — escolha a filial
+    certa na coluna ao lado e salve.</div>`;
+}
+
 function linhaUsuario(u, novo){
   const abas = String(u.abas||'').split(',').filter(String);
+  /* A filial gravada no usuário tem de ser uma das filiais cadastradas. Se
+     não for — porque a loja mudou de nome, por exemplo —, o seletor mostrava
+     "Todas" e ninguém via o problema: o gerente entrava e não achava nenhum
+     funcionário, e aqui estava tudo aparentemente certo. Agora a opção órfã
+     aparece marcada, com o aviso. */
+  const casa = S.filiais.some(f=>f.nome === u.filial);
+  const orfa = !!u.filial && !casa;
   const opsFil = ['<option value="">Todas</option>']
+    .concat(orfa ? [`<option value="${esc(u.filial)}" selected>${esc(u.filial)} — não existe mais</option>`] : [])
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${u.filial===f.nome?'selected':''}>${esc(f.nome)}</option>`)).join('');
+  /* quantos funcionários este usuário enxerga de fato */
+  const quantos = u.papel !== 'GERENTE' || !u.filial
+    ? null
+    : S.funcionarios.filter(f=>chaveFilial(f.filial) === chaveFilial(u.filial)).length;
   const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','CANDIDATOS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
@@ -4775,7 +4812,10 @@ function linhaUsuario(u, novo){
       <option value="GERENTE_RH" ${u.papel==='GERENTE_RH'?'selected':''}>Gerente RH</option>
       ${ehMaster()||u.papel==='MASTER'?`<option value="MASTER" ${u.papel==='MASTER'?'selected':''}>Master</option>`:''}
     </select></td>
-    <td><select class="entrada" data-u="filial">${opsFil}</select></td>
+    <td><select class="entrada ${orfa?'campo-erro':''}" data-u="filial">${opsFil}</select>
+      ${quantos === null ? '' : `<div class="conta-filial ${quantos?'':'zero'}">${
+        quantos} ${quantos===1?'funcionário':'funcionários'} nesta filial${
+        quantos ? '' : ' — ele entra e não vê ninguém'}</div>`}</td>
     <td><div class="chips">${chips}
       <button class="link-acao" data-u-todas="1" title="Marcar todas as abas">todas</button>
     </div></td>
