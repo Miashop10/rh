@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.10.26b';
+  const VERSAO_APP = '2026.11.04b';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -1043,6 +1043,14 @@ body.celular #conteudo{padding:0}
 /* usuário apontando para filial inexistente, ou para uma filial sem gente */
 .campo-erro{border-color:var(--vermelho) !important;background:var(--vermelho-suave)}
 .conta-filial{font-size:11px;color:var(--apagado);margin-top:4px}
+/* filtro de período: de/até, com o rótulo dizendo qual data é a da aba */
+.filtro-datas{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.filtro-datas .campo-lbl{margin:0;font-size:10px}
+.filtro-datas .ate{font-size:11px;color:var(--apagado)}
+.filtro-datas input{padding:7px 8px;font-size:12px;width:138px}
+.filtro-datas.ligado input{border-color:var(--tinta);background:#fff}
+.filtro-datas.ligado .campo-lbl{color:var(--tinta);font-weight:700}
+@media(max-width:900px){ .filtro-datas{flex-wrap:wrap} .filtro-datas input{width:120px} }
 .conta-filial.zero{color:var(--vermelho);font-weight:600}
 .cel-fechado{
   background:var(--ambar-suave);border:1px solid var(--ambar);color:#7a5308;
@@ -1167,6 +1175,12 @@ const BIBLIOTECAS = {
     url:'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
     pronta:()=>window.XLSX
   },
+  /* O SheetJS não escreve fonte nem borda; o ExcelJS escreve. É usado só
+     no relatório da folha, que o contador recebe formatado. */
+  exceljs: {
+    url:'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+    pronta:()=>window.ExcelJS
+  },
   pdfjs: {
     url:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
     pronta:()=>window.pdfjsLib,
@@ -1205,8 +1219,11 @@ const S = {
   aba:'FUNCIONARIOS', filtroFilial:'TODAS', busca:'', tiposEdit:null, excluidos:[], pendAberta:null,
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{}, cacheDocs:{},
   candidatos:[], candSel:new Set(),
+  /* faixa de datas por aba: admissão em Funcionários, saída em Ex-funcionários */
+  datas:{admissao:{de:'',ate:''}, saida:{de:'',ate:''}},
   he:{ calculos:[], calculoId:'', resultados:[] },
-  cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[] },
+  cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[],
+         autoFeito:null },
   grupos:[],
   folha:{ competencia:null, linhas:{}, diasRua:'', diasShop:'', zoom:null },
   /* tamanho escolhido à mão em cada aba; sem escolha, o sistema ajusta sozinho */
@@ -1796,6 +1813,8 @@ function aplicarCarga(d){
     S.cont.comissoes = d.contabilidade.comissoes || [];
     S.cont.quebras = d.contabilidade.quebras || [];
     S.cont.competencia = S.competencia;
+    S.cont.autoFeito = null;
+    preencherAutomatico();
   }
   if(S.folha.competencia && S.folha.competencia !== S.competencia) S.folha.competencia = null;
   if(S.com.competencia && S.com.competencia !== S.competencia) S.com.competencia = null;
@@ -1897,7 +1916,7 @@ function tiposDe(f){
 }
 
 function situacao(f){
-  if(f.status==='DEMITIDO') return 'neutro';
+  if(saiu(f)) return 'neutro';
   if(f.dataAdmissao){
     const adm = new Date(f.dataAdmissao+'T12:00:00');
     if(adm > fimDoMes(S.competencia)) return 'neutro';   // admitido depois da competência
@@ -1914,7 +1933,7 @@ function situacao(f){
    CLT: 30 dias de contrato terminam em "admissão + 29". Daí a primeira faixa
    ir até o 29º dia de diferença e a segunda do 30º ao 60º. */
 function experiencia(f){
-  if(!f || !f.dataAdmissao || f.status==='DEMITIDO') return null;
+  if(!f || !f.dataAdmissao || saiu(f)) return null;
   const adm = new Date(f.dataAdmissao+'T12:00:00');
   if(isNaN(adm)) return null;
   const hoje = new Date();
@@ -1946,11 +1965,20 @@ function seloExperiencia(f){
 }
 
 const SITUACOES = {
-  EMPREGADO:{rotulo:'Empregado', classe:'emp'},
-  AVISO:    {rotulo:'Aviso prévio', classe:'alerta'},
-  FERIAS:   {rotulo:'Férias', classe:'alerta'},
-  DEMITIDO: {rotulo:'Demitido', classe:'dem'}
+  EMPREGADO:      {rotulo:'Empregado', classe:'emp'},
+  AVISO:          {rotulo:'Aviso prévio', classe:'alerta'},
+  FERIAS:         {rotulo:'Férias', classe:'alerta'},
+  DEMITIDO:       {rotulo:'Demitido', classe:'dem'},
+  JUSTA_CAUSA:    {rotulo:'Justa causa', classe:'dem'},
+  PEDIU_DEMISSAO: {rotulo:'Pediu demissão', classe:'dem'},
+  FIM_CONTRATO:   {rotulo:'Fim de contrato', classe:'dem'}
 };
+/* As quatro últimas são formas de desligamento: todas mandam o funcionário
+   para a aba Ex-funcionários e tiram ele das listas de quem está na casa.
+   O que muda entre elas é o motivo da saída, que o RH precisa registrar. */
+const STATUS_SAIU = ['DEMITIDO','JUSTA_CAUSA','PEDIU_DEMISSAO','FIM_CONTRATO'];
+function saiu(f){ return STATUS_SAIU.includes((f && f.status) || ''); }
+function estaNaCasa(f){ return !saiu(f); }
 function selo(status){
   const s = SITUACOES[status] || SITUACOES.EMPREGADO;
   return `<span class="selo ${s.classe}">${s.rotulo}</span>`;
@@ -2185,6 +2213,7 @@ function barraFiltros(comBotao){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
+    ${filtroDeDatas(comBotao ? 'admissao' : 'saida')}
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
     ${comBotao&&podeAprovar()?`
       <button class="btn sec mini" id="folhaVale"
@@ -2195,17 +2224,66 @@ function barraFiltros(comBotao){
   </div>`;
 }
 
-function filtrar(lista){
+/* ------------------------------------------------------------------
+   FILTRO DE DATAS
+   Na aba Funcionários filtra por data de admissão; na de Ex-funcionários,
+   por data de saída — é a data que interessa em cada uma. Fica guardado
+   por aba, para trocar de aba não apagar o que foi escolhido.
+   ------------------------------------------------------------------ */
+function filtroDeDatas(qual){
+  const f = S.datas[qual] || {de:'', ate:''};
+  const rotulo = qual === 'admissao' ? 'Admissão' : 'Saída';
+  const ativo = f.de || f.ate;
+  return `<div class="filtro-datas ${ativo?'ligado':''}" data-datas="${qual}">
+    <span class="campo-lbl">${rotulo}</span>
+    <input class="entrada" type="date" id="dataDe" value="${esc(f.de)}" title="A partir de">
+    <span class="ate">até</span>
+    <input class="entrada" type="date" id="dataAte" value="${esc(f.ate)}" title="Até">
+    ${ativo ? '<button class="link-acao" id="dataLimpar" title="Tirar o filtro">limpar</button>' : ''}
+  </div>`;
+}
+
+function ligarFiltroDeDatas(){
+  const cx = document.querySelector('[data-datas]');
+  if(!cx) return;
+  const qual = cx.dataset.datas;
+  const guardar = ()=>{
+    S.datas[qual] = {
+      de: cx.querySelector('#dataDe').value,
+      ate: cx.querySelector('#dataAte').value
+    };
+    desenhar();
+  };
+  cx.querySelector('#dataDe').onchange = guardar;
+  cx.querySelector('#dataAte').onchange = guardar;
+  const limpar = cx.querySelector('#dataLimpar');
+  if(limpar) limpar.onclick = ()=>{ S.datas[qual] = {de:'', ate:''}; desenhar(); };
+}
+
+/* Sem data gravada o funcionário fica de fora assim que houver filtro: é o
+   que o RH espera de "admitidos entre tal e tal data". */
+function dentroDoPeriodo(data, faixa){
+  if(!faixa || (!faixa.de && !faixa.ate)) return true;
+  const d = String(data || '');
+  if(!d) return false;
+  if(faixa.de && d < faixa.de) return false;
+  if(faixa.ate && d > faixa.ate) return false;
+  return true;
+}
+
+function filtrar(lista, qualData){
   const b = S.busca.trim().toUpperCase();
+  const faixa = qualData ? S.datas[qualData] : null;
   return lista.filter(f=>
     (S.filtroFilial==='TODAS' || f.filial===S.filtroFilial) &&
-    (!b || f.nome.toUpperCase().includes(b))
+    (!b || f.nome.toUpperCase().includes(b)) &&
+    (!faixa || dentroDoPeriodo(qualData === 'saida' ? f.dataDemissao : f.dataAdmissao, faixa))
   );
 }
 
 /* ---------- ABA 1: FUNCIONÁRIOS ---------- */
 function telaFuncionarios(){
-  const ativos = filtrar(S.funcionarios.filter(f=>f.status!=='DEMITIDO'))
+  const ativos = filtrar(S.funcionarios.filter(estaNaCasa), 'admissao')
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
                   || a.nome.localeCompare(b.nome,'pt-BR'));
 
@@ -2306,12 +2384,13 @@ function linhaFuncionario(f){
 
 /* ---------- ABA 2: EX-FUNCIONÁRIOS ---------- */
 function telaEx(){
-  const ex = filtrar(S.funcionarios.filter(f=>f.status==='DEMITIDO'))
+  const ex = filtrar(S.funcionarios.filter(saiu), 'saida')
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
                   || a.nome.localeCompare(b.nome,'pt-BR'));
   let html = barraFiltros(false);
   if(!ex.length) return html + vazio('Nenhum ex-funcionário',
-    'Ao alterar o status de alguém para Demitido, o nome aparece aqui.');
+    'Quem for marcado como Demitido, Justa causa, Pediu demissão ou Fim de '+
+    'contrato no cadastro aparece aqui.');
 
   html += `<div class="aviso info" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
     <span>${ex.length} ${ex.length===1?'ex-funcionário':'ex-funcionários'},
@@ -2332,7 +2411,7 @@ function telaEx(){
       <td class="mono">${dataBonita(f.dataAdmissao)}</td>
       <td class="mono">${dataBonita(f.dataDemissao)}</td>
       <td class="t-banco mono" title="${esc(f.cpf?'CPF '+f.cpf:'')}">${bancoResumido(f)}</td>
-      <td>${selo('DEMITIDO')}</td>
+      <td>${selo(f.status)}</td>
       <td style="white-space:nowrap;text-align:right">
         <button class="btn sec mini" data-docs="${f.id}">Documentos</button>
         ${podeAprovar()?`<button class="btn sec mini" data-hist="${f.id}">Histórico</button>`:''}
@@ -2349,7 +2428,7 @@ function telaEx(){
 
   html += `<div class="painel" style="padding:0"><div class="rolagem-alta">
     <table class="tab-func"><thead><tr>
-      <th>Filial</th><th>Ex-funcionário</th><th>Cargo</th><th>Admissão</th><th>Demissão</th>
+      <th>Filial</th><th>Ex-funcionário</th><th>Cargo</th><th>Admissão</th><th>Saída</th>
       <th>Dados bancários</th><th>Situação</th><th></th>
     </tr></thead><tbody>${corpo}</tbody></table></div></div>`;
   return html;
@@ -2357,7 +2436,7 @@ function telaEx(){
 
 /* ---------- ABA 3: PENDÊNCIAS ---------- */
 function telaPendencias(){
-  const ativos = S.funcionarios.filter(f=>f.status!=='DEMITIDO');
+  const ativos = S.funcionarios.filter(estaNaCasa);
   const tipos = S.config.tiposObrigatorios;
   const filiais = [...new Set(ativos.map(f=>f.filial))].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
   let html = `<div class="aviso info">Faltas por filial na competência <b>${compBonita(S.competencia)}</b> ·
@@ -2469,6 +2548,7 @@ function ligarDelegacao(){
 let buscaTimer = null;
 function ligarEventos(){
   ligarDelegacao();
+  ligarFiltroDeDatas();
   const busca = document.getElementById('campoBusca');
   if(busca){
     busca.oninput = e=>{
@@ -2580,7 +2660,7 @@ function confirmarExclusao(funcId){
         ${qtd?`(${qtd} ${qtd===1?'anexo':'anexos'} na competência aberta) `:''}continuam
         na pasta do Google Drive, e o MASTER ou o RH podem restaurar o cadastro depois.
       </div>
-      ${f.status!=='DEMITIDO' ? `<div class="aviso info">
+      ${estaNaCasa(f) ? `<div class="aviso info">
         Se a pessoa saiu da empresa, o certo é mudar a situação para <b>Demitido</b>:
         ela passa para Ex-funcionários e todo o histórico fica preservado.
       </div>` : ''}
@@ -2589,7 +2669,7 @@ function confirmarExclusao(funcId){
       <div id="confErro"></div>
     </div>
     <div class="modal-pe">
-      ${f.status!=='DEMITIDO'?'<button class="btn sec" id="confDemitir" style="margin-right:auto">Marcar como demitido</button>':'<span style="margin-right:auto"></span>'}
+      ${estaNaCasa(f)?'<button class="btn sec" id="confDemitir" style="margin-right:auto">Registrar saída</button>':'<span style="margin-right:auto"></span>'}
       <button class="btn sec" id="confCancelar">Cancelar</button>
       <button class="btn perigo" id="confOk" disabled>Excluir cadastro</button>
     </div>`);
@@ -3493,8 +3573,8 @@ function abrirFuncionario(id, extra){
             ${Object.keys(SITUACOES).map(k=>
               `<option value="${k}" ${f.status===k?'selected':''}>${SITUACOES[k].rotulo}</option>`).join('')}
           </select></div>
-        <div id="boxDem" style="display:${f.status==='DEMITIDO'?'block':'none'}">
-          <label class="campo-lbl" for="fDem">Data de demissão</label>
+        <div id="boxDem" style="display:${saiu(f)?'block':'none'}">
+          <label class="campo-lbl" for="fDem">Data de saída</label>
           <input class="entrada" type="date" id="fDem" value="${esc(f.dataDemissao)}"></div>
       </div>
 
@@ -3558,7 +3638,8 @@ function abrirFuncionario(id, extra){
     </div>`);
 
   const st = el.querySelector('#fStatus');
-  st.onchange = ()=> el.querySelector('#boxDem').style.display = st.value==='DEMITIDO'?'block':'none';
+  st.onchange = ()=> el.querySelector('#boxDem').style.display =
+    STATUS_SAIU.includes(st.value) ? 'block' : 'none';
 
   const mostrarCnpj = ()=>{
     const fil = S.filiais.find(x=>x.nome===el.querySelector('#fFilial').value);
@@ -3583,7 +3664,7 @@ function abrirFuncionario(id, extra){
       dataAdmissao: el.querySelector('#fAdm').value,
       dataInicio: el.querySelector('#fIni').value,
       status: el.querySelector('#fStatus').value,
-      dataDemissao: el.querySelector('#fStatus').value==='DEMITIDO'
+      dataDemissao: STATUS_SAIU.includes(el.querySelector('#fStatus').value)
         ? el.querySelector('#fDem').value : '',
       cpf: el.querySelector('#fCpf').value.trim(),
       banco: el.querySelector('#fBanco').value.trim(),
@@ -3648,7 +3729,7 @@ function abrirFuncionario(id, extra){
       tipoConta: el.querySelector('#fTipoConta').value,
       recebeVale: el.querySelector('#fVale').value,
       status: st.value,
-      dataDemissao: st.value==='DEMITIDO' ? el.querySelector('#fDem').value : '',
+      dataDemissao: STATUS_SAIU.includes(st.value) ? el.querySelector('#fDem').value : '',
       observacoes: el.querySelector('#fObs').value
     };
     /* a ficha completa só vai junto depois de ter sido carregada: salvar o
@@ -3664,8 +3745,9 @@ function abrirFuncionario(id, extra){
     if(!dados.nome || !dados.filial){
       el.querySelector('#fErro').innerHTML = '<div class="aviso erro">Informe o nome completo e a filial.</div>'; return;
     }
-    if(dados.status==='DEMITIDO' && !dados.dataDemissao){
-      el.querySelector('#fErro').innerHTML = '<div class="aviso erro">Informe a data de demissão.</div>'; return;
+    if(STATUS_SAIU.includes(dados.status) && !dados.dataDemissao){
+      el.querySelector('#fErro').innerHTML =
+        '<div class="aviso erro">Informe a data de saída.</div>'; return;
     }
     carregando(true);
     try{
@@ -3683,7 +3765,7 @@ function abrirFuncionario(id, extra){
       S.destacar = r.id;
       desenhar();
       if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
-      toast(dados.status==='DEMITIDO' ? 'Funcionário movido para Ex-funcionários.'
+      toast(STATUS_SAIU.includes(dados.status) ? 'Funcionário movido para Ex-funcionários.'
             : dados.status==='EMPREGADO' ? 'Cadastro salvo.'
             : 'Situação alterada para '+SITUACOES[dados.status].rotulo+'. Continua na aba Funcionários.');
     }catch(e){ toast(e.message,true); }
@@ -4872,7 +4954,7 @@ async function acao(nome, dados, el, qual, msg){
    ================================================================== */
 function funcionariosDaComissao(){
   return S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
@@ -5125,7 +5207,7 @@ async function exportarComissoesExcel(){
    ================================================================== */
 function funcionariosDaQuebra(){
   return S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
@@ -5987,9 +6069,18 @@ function linhaFolhaDe(f){
   };
 }
 
+/* Quem está de férias ou em aviso prévio continua na lista do VT/VR — pode
+   haver dias a pagar no mês —, mas precisa estar à vista: o valor do mês
+   quase nunca é o cheio. */
+function seloSituacao(f){
+  if(f.status === 'FERIAS') return ' <span class="selo-exp e1">FÉRIAS</span>';
+  if(f.status === 'AVISO')  return ' <span class="selo-exp av">AVISO</span>';
+  return '';
+}
+
 function funcionariosDaFolha(){
   return S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
@@ -6042,7 +6133,8 @@ function telaVtVr(){
                style="width:72px"></div>
       <button class="btn sec" id="vvAplicar">Preencher dias</button>
     </div>
-    <button class="btn sec" id="vvExcel">Excel</button>
+    <button class="btn sec" id="vvExcelVt" title="Planilha do vale-transporte, com CPF e dados bancários">VT em Excel</button>
+    <button class="btn sec" id="vvExcelVr" title="Planilha do vale-refeição">VR em Excel</button>
     <button class="btn" id="vvSalvar">Salvar</button>
   </div>
   <div class="aviso info">
@@ -6070,7 +6162,7 @@ function telaVtVr(){
   lista.forEach(f=>{
     const d = linhaFolhaDe(f);
     html += `<tr>
-      <td class="col-fixa"><b>${esc(f.nome)}</b></td>
+      <td class="col-fixa"><b>${esc(f.nome)}</b>${seloSituacao(f)}</td>
       <td style="color:var(--apagado)">${esc(f.filial||'—')}</td>
       <td><input class="entrada cel-vv dinheiro ${d.vtHerdado?'herdado':''}"
                  data-vv="${f.id}" data-campo="vtDiario" value="${esc(d.vtDiario)}"
@@ -6155,28 +6247,88 @@ function ligarVtVr(){
             : 'Nenhuma filial da lista está marcada como rua ou shopping.', !n);
   };
   if(b('vvSalvar')) b('vvSalvar').onclick = ()=>salvarFolha();
-  if(b('vvExcel')) b('vvExcel').onclick = exportarVtVrExcel;
+  if(b('vvExcelVt')) b('vvExcelVt').onclick = exportarVtExcel;
+  if(b('vvExcelVr')) b('vvExcelVr').onclick = exportarVrExcel;
 }
 
-async function exportarVtVrExcel(){
+/* ------------------------------------------------------------------
+   RELATÓRIOS DE VT E DE VR
+   Saem separados porque vão para lugares diferentes: o do VT segue para
+   quem compra o vale-transporte e precisa dos dados bancários e do CPF
+   de cada um; o do VR é só a conferência do valor por pessoa.
+   ------------------------------------------------------------------ */
+function linhasDeVtVr(){
+  return funcionariosDaFolha().map(f=>({f, d: linhaFolhaDe(f)}));
+}
+
+function situacaoNoRelatorio(f){
+  return f.status === 'FERIAS' ? 'FÉRIAS'
+       : f.status === 'AVISO'  ? 'AVISO PRÉVIO' : '';
+}
+
+async function exportarVtExcel(){
+  const itens = linhasDeVtVr().filter(x=>x.d.totalVt > 0 || valorNum(x.d.vtDiario) > 0);
+  if(!itens.length) return toast('Nenhum VT lançado em '+compBonita(S.competencia)+'.', true);
   await usar('xlsx');
-  const lista = funcionariosDaFolha();
-  const dados = [['FUNCIONÁRIO','FILIAL','VALOR DO VT','DIAS','TOTAL VT',
-    'VALOR DO VR','TOTAL VR']]
-    .concat(lista.map(f=>{
-      const d = linhaFolhaDe(f);
-      return [f.nome, f.filial||'', d.vtDiario, d.dias, moeda(d.totalVt),
-              d.vrDiario, moeda(d.totalVr)];
-    }))
-    .concat([['TOTAL','','', String(lista.reduce((s,f)=>s+valorNum(linhaFolhaDe(f).dias),0)),
-      moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVt,0)), '',
-      moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))]]);
-  const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:14},{wch:14},{wch:14}];
+  const cab = ['FUNCIONÁRIO','CPF','BANCO','AGÊNCIA','CONTA','FILIAL','SITUAÇÃO',
+               'VALOR DO VT','DIAS','TOTAL VT'];
+  const linhas = itens.map(({f, d})=>[f.nome, f.cpf||'', f.banco||'', f.agencia||'',
+    f.conta ? f.conta + (f.tipoConta==='POUPANCA' ? ' (poupança)' : '') : '',
+    f.filial||'', situacaoNoRelatorio(f), valorNum(d.vtDiario), valorNum(d.dias), d.totalVt]);
+  const total = ['TOTAL','','','','','','','',
+    itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
+    itens.reduce((t,x)=>t+x.d.totalVt,0)];
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
+  ws['!cols'] = [{wch:36},{wch:16},{wch:14},{wch:10},{wch:16},{wch:20},{wch:14},
+                 {wch:13},{wch:8},{wch:13}];
+  dinheiroNaColuna(ws, [7, 9], linhas.length + 1);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'VT VR');
-  XLSX.writeFile(wb, 'VT E VR '+compArquivo(S.competencia)+'.xlsx');
-  toast('Planilha gerada.');
+  XLSX.utils.book_append_sheet(wb, ws, 'VT');
+  XLSX.writeFile(wb, 'VT '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
+  avisarSemBanco(itens);
+  toast('Relatório de VT: '+itens.length+' funcionários.');
+}
+
+async function exportarVrExcel(){
+  const itens = linhasDeVtVr().filter(x=>x.d.totalVr > 0 || valorNum(x.d.vrDiario) > 0);
+  if(!itens.length) return toast('Nenhum VR lançado em '+compBonita(S.competencia)+'.', true);
+  await usar('xlsx');
+  const cab = ['FUNCIONÁRIO','FILIAL','SITUAÇÃO','VALOR DO VR','DIAS','TOTAL VR'];
+  const linhas = itens.map(({f, d})=>[f.nome, f.filial||'', situacaoNoRelatorio(f),
+    valorNum(d.vrDiario), valorNum(d.dias), d.totalVr]);
+  const total = ['TOTAL','','','',
+    itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
+    itens.reduce((t,x)=>t+x.d.totalVr,0)];
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
+  ws['!cols'] = [{wch:36},{wch:20},{wch:14},{wch:13},{wch:8},{wch:13}];
+  dinheiroNaColuna(ws, [3, 5], linhas.length + 1);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'VR');
+  XLSX.writeFile(wb, 'VR '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
+  toast('Relatório de VR: '+itens.length+' funcionários.');
+}
+
+function sufixoFilial(){
+  return S.filtroFilial === 'TODAS' ? '' : ' ' + S.filtroFilial;
+}
+
+/* duas casas nas colunas de dinheiro, senão o Excel mostra 12,4 em vez de 12,40 */
+function dinheiroNaColuna(ws, colunas, ultimaLinha){
+  for(let r = 1; r <= ultimaLinha; r++){
+    colunas.forEach(c=>{
+      const cel = ws[XLSX.utils.encode_cell({r, c})];
+      if(cel && typeof cel.v === 'number') cel.z = '#,##0.00';
+    });
+  }
+}
+
+/* Sem conta, o VT não é depositado. Melhor saber antes de mandar a planilha. */
+function avisarSemBanco(itens){
+  const faltam = itens.filter(x=>!x.f.banco || !x.f.agencia || !x.f.conta);
+  if(!faltam.length) return;
+  toast(faltam.length+' sem dados bancários completos: '+
+    faltam.slice(0,5).map(x=>x.f.nome.split(' ')[0]).join(', ')+
+    (faltam.length>5 ? ' e mais '+(faltam.length-5) : ''), true);
 }
 
 function telaFolha(){
@@ -6201,7 +6353,7 @@ function telaFolha(){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
-    <button class="btn sec" id="contPuxar">Puxar horas extras</button>
+    <button class="btn sec" id="contPuxar" title="Traz o cartão ponto, a premiação, as quebras e o VT/VR para esta folha">Puxar lançamentos</button>
     <button class="btn sec" id="folhaExcel">Excel</button>
     <button class="btn sec" id="folhaPdf">PDF folha</button>
     <button class="btn sec" id="contPdf">PDF contáb.</button>
@@ -6246,7 +6398,7 @@ function telaFolha(){
     const l = S.cont.linhas[f.id] || {};
     const ap = apuracaoDe(f);
     html += `<tr>
-      <td class="col-fixa"><b>${esc(f.nome)}</b></td>
+      <td class="col-fixa"><b>${esc(f.nome)}</b>${seloSituacao(f)}</td>
       <td style="color:var(--apagado)" title="${esc(d.grupo||'sem grupo')}${d.grupoProprio?' (grupo próprio do funcionário)':''}">${esc(f.filial||'—')}${d.grupoProprio?' <span class="marca-mes">grupo próprio</span>':''}</td>
       <td><input class="entrada cel-folha dinheiro ${d.valeHerdado?'herdado':''}"
                  data-f="${f.id}" data-campo="vale" value="${esc(d.vale)}"
@@ -6777,7 +6929,131 @@ function tabelaFolhaUnida(){
   return {cab, linhas, total};
 }
 
+/* ------------------------------------------------------------------
+   PLANILHA DA FOLHA
+   Sai no leiaute que a contabilidade já usa: uma aba por filial, o nome
+   e o CNPJ dela na primeira linha, e as colunas na ordem do modelo do
+   RH. Fonte 10 e grade em todas as células.
+   ------------------------------------------------------------------ */
+const COLUNAS_FOLHA_EXCEL = [
+  {titulo:'FUNCIONÁRIO',       larg:30, tipo:'texto'},
+  {titulo:'VALE MENSAL',       larg:11, tipo:'dinheiro', campo:'vale'},
+  {titulo:'H. EXTRAS 50%',     larg:11, tipo:'texto',    campo:'he50'},
+  {titulo:'H. EXTRAS 100%',    larg:12, tipo:'texto',    campo:'he100'},
+  {titulo:'AD. NOTURNO',       larg:11, tipo:'texto',    campo:'adNoturno'},
+  {titulo:'FALTAS',            larg:10, tipo:'texto',    campo:'faltas'},
+  {titulo:'ATRASOS',           larg:8,  tipo:'texto',    campo:'atrasos'},
+  {titulo:'PREMIAÇÃO',         larg:10, tipo:'dinheiro', campo:'comissoes'},
+  {titulo:'VR MÊS ANTERIOR',   larg:14, tipo:'dinheiro', campo:'vrAnterior'},
+  {titulo:'VR MÊS ATUAL',      larg:12, tipo:'dinheiro', campo:'vrAtual'},
+  {titulo:'VT MÊS ATUAL',      larg:12, tipo:'dinheiro', campo:'vt'},
+  {titulo:'QUEBRA DE PRODUTOS',larg:17, tipo:'dinheiro', campo:'quebra'}
+];
+
+/* "21.253.328/0016-76" → "0016-76": é como a contabilidade chama a filial */
+function sufixoCnpj(cnpj){
+  const m = /\/(\S+)$/.exec(String(cnpj||''));
+  return m ? m[1] : '';
+}
+
+function valorDaCelulaFolha(f, col){
+  if(!col.campo) return f.nome;
+  const l = S.cont.linhas[f.id] || {};
+  if(col.campo === 'vale') return linhaFolhaDe(f).vale;
+  return l[col.campo] || '';
+}
+
 async function exportarFolhaExcel(){
+  const lista = funcionariosDaFolha();
+  if(!lista.length) return toast('Nenhum funcionário nesta seleção.', true);
+
+  /* uma aba por filial: o cabeçalho traz o CNPJ, e com todas as filiais
+     juntas não haveria um CNPJ só para pôr lá */
+  const porFilial = [];
+  lista.forEach(f=>{
+    const nome = f.filial || 'SEM FILIAL';
+    let g = porFilial.find(x=>x.nome === nome);
+    if(!g){ g = {nome, lista:[]}; porFilial.push(g); }
+    g.lista.push(f);
+  });
+
+  carregando(true);
+  try{
+    try{ await usar('exceljs'); }
+    catch(e){ carregando(false); return exportarFolhaExcelSimples(); }
+
+    const wb = new ExcelJS.Workbook();
+    const borda = {
+      top:{style:'thin', color:{argb:'FF9AA3AD'}},
+      left:{style:'thin', color:{argb:'FF9AA3AD'}},
+      bottom:{style:'thin', color:{argb:'FF9AA3AD'}},
+      right:{style:'thin', color:{argb:'FF9AA3AD'}}
+    };
+
+    porFilial.forEach(g=>{
+      const fil = S.filiais.find(x=>x.nome === g.nome) || {};
+      const sufixo = sufixoCnpj(fil.cnpj);
+      /* o nome da aba não aceita : \ / ? * [ ] nem passa de 31 caracteres */
+      const nomeAba = (sufixo || g.nome).replace(/[:\\\/?*\[\]]/g,'-').substring(0,31);
+      const ws = wb.addWorksheet(nomeAba);
+      ws.columns = COLUNAS_FOLHA_EXCEL.map(c=>({width:c.larg}));
+
+      /* "FILIAL LONDRINA", mas não "FILIAL FILIAL 1" se a loja já se chamar assim */
+      const comFilial = /^FILIAL\b/i.test(g.nome) ? g.nome : 'FILIAL ' + g.nome;
+      const titulo = 'MIASHOP CONVENIÊNCIAS - ' + comFilial +
+        (fil.cnpj ? ' - CNPJ ' + fil.cnpj : '');
+      ws.mergeCells(1, 1, 1, COLUNAS_FOLHA_EXCEL.length);
+      const cT = ws.getCell(1, 1);
+      cT.value = titulo;
+      cT.font = {name:'Calibri', size:10, bold:true};
+      cT.alignment = {horizontal:'center', vertical:'middle'};
+
+      ws.addRow(COLUNAS_FOLHA_EXCEL.map(c=>c.titulo));
+      g.lista.forEach(f=>{
+        ws.addRow(COLUNAS_FOLHA_EXCEL.map(c=>{
+          const v = valorDaCelulaFolha(f, c);
+          if(c.tipo !== 'dinheiro') return v || '';
+          const n = valorNum(v);
+          return n ? n : '';
+        }));
+      });
+
+      /* fonte 10 e grade em tudo, inclusive no título */
+      for(let r = 1; r <= ws.rowCount; r++){
+        for(let c = 1; c <= COLUNAS_FOLHA_EXCEL.length; c++){
+          const cel = ws.getCell(r, c);
+          if(!cel.font) cel.font = {name:'Calibri', size:10};
+          else cel.font = Object.assign({name:'Calibri', size:10}, cel.font);
+          cel.border = borda;
+          if(r === 2){
+            cel.font = {name:'Calibri', size:10, bold:true};
+            cel.alignment = {horizontal:'center', wrapText:true};
+          }
+          if(r > 2 && COLUNAS_FOLHA_EXCEL[c-1].tipo === 'dinheiro'){
+            cel.numFmt = '#,##0.00';
+            cel.alignment = {horizontal:'right'};
+          }
+          if(r > 2 && c > 1 && COLUNAS_FOLHA_EXCEL[c-1].tipo === 'texto'){
+            cel.alignment = {horizontal:'center'};
+          }
+        }
+      }
+      ws.getRow(2).height = 28;
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const sufixoArq = S.filtroFilial === 'TODAS' ? '' : ' ' + S.filtroFilial;
+    baixar(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'FOLHA '+compArquivo(S.competencia)+sufixoArq+'.xlsx');
+    toast('Planilha gerada: '+porFilial.length+
+      (porFilial.length===1 ? ' filial.' : ' filiais, uma aba cada.'));
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+/* Reserva: se a biblioteca de formatação não carregar (internet da loja
+   instável, por exemplo), sai a planilha sem a grade em vez de nada. */
+async function exportarFolhaExcelSimples(){
   await usar('xlsx');
   const {cab, linhas, total} = semColunas(tabelaFolhaUnida(), FORA_DO_RELATORIO);
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
@@ -6787,7 +7063,8 @@ async function exportarFolhaExcel(){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
-  toast('Planilha gerada com a folha e os lançamentos.');
+  toast('Planilha gerada sem a formatação — não consegui carregar o '+
+        'recurso de formatação da internet.', true);
 }
 
 async function exportarFolhaPdf(){
@@ -6852,7 +7129,16 @@ async function exportarFolhaPdf(){
       const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
       pg.drawText('Folha de pagamento · '+compBonita(S.competencia),
         {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
-      y -= 36;
+      /* Com uma filial escolhida, o CNPJ dela vai no cabeçalho: é o que a
+         contabilidade precisa para saber de qual empresa é a folha. Com
+         "Todas as filiais" não há um CNPJ só, então sai a contagem. */
+      const fil = S.filtroFilial === 'TODAS'
+        ? null : S.filiais.find(x=>x.nome === S.filtroFilial);
+      const sub = fil
+        ? S.filtroFilial + (fil.cnpj ? '  ·  CNPJ ' + fil.cnpj : '  ·  CNPJ não cadastrado')
+        : 'Todas as filiais';
+      pg.drawText(sub, {x:m, y:y-34, size:8.5, font:fonte, color:rgb(.42,.45,.5)});
+      y -= 48;
       titulos.forEach((c,i)=> c.linhas.forEach((l,k)=>
         pg.drawText(l, {x:xs[i], y:y-k*ALTURA_CAB, size:c.tam, font:fonteB,
           color:rgb(.42,.45,.5)})));
@@ -7145,6 +7431,33 @@ function somaHoras(lista){
   }, 0));
 }
 
+/* ------------------------------------------------------------------
+   PREENCHIMENTO AUTOMÁTICO
+   Os valores que vêm do cartão ponto, da premiação e das quebras eram
+   mostrados em cinza claro, como sugestão, e o RH tinha de digitar um
+   por um o número que já estava na tela — trabalho puro, e uma chance
+   de errar de digitação a cada campo.
+   Agora entram preenchidos. Só preenche campo vazio: o que o RH
+   escreveu por cima manda sempre, e apagar um valor de propósito
+   continua valendo (roda uma vez por competência, não a cada desenho).
+   ------------------------------------------------------------------ */
+function preencherAutomatico(){
+  if(S.cont.competencia !== S.competencia) return;
+  if(S.cont.autoFeito === S.competencia) return;
+  S.cont.autoFeito = S.competencia;
+  const AUTO = ['he50','he100','adNoturno','faltas','atrasos','comissoes','quebra'];
+  let n = 0;
+  linhasContabilidade().forEach(f=>{
+    const ap = apuracaoDe(f);
+    if(!ap) return;
+    const l = S.cont.linhas[f.id] || (S.cont.linhas[f.id] = {funcionarioId:f.id});
+    AUTO.forEach(c=>{
+      if(ap[c] && !String(l[c]||'').trim()){ l[c] = ap[c]; n++; }
+    });
+  });
+  return n;
+}
+
 /* de onde vem cada valor automático */
 function apuracaoDe(f){
   const vivo = S.he.resultados.find(r=>
@@ -7180,7 +7493,7 @@ function comissaoDe(f){
 
 function linhasContabilidade(){
   return S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR') || a.nome.localeCompare(b.nome,'pt-BR'));
@@ -7203,7 +7516,7 @@ function telaContabilidade(){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
-    <button class="btn sec" id="contPuxar">Puxar horas extras</button>
+    <button class="btn sec" id="contPuxar" title="Traz o cartão ponto, a premiação, as quebras e o VT/VR para esta folha">Puxar lançamentos</button>
     <button class="btn sec" id="contExcel">Excel</button>
     <button class="btn sec" id="contPdf">PDF</button>
     <button class="btn" id="contSalvar">Salvar lançamentos</button>
@@ -7266,6 +7579,8 @@ async function carregarContabilidade(){
     S.cont.comissoes = d.comissoes || [];
     S.cont.quebras = d.quebras || [];
     S.cont.competencia = S.competencia;
+    S.cont.autoFeito = null;
+    preencherAutomatico();
     desenhar();
   }catch(e){ toast(e.message, true); }
   finally{ carregando(false); delete emVoo['carregarContabilidade']; }
@@ -7335,18 +7650,69 @@ function limparCartoes(){
   toast(n+' cartão(ões) retirados da tela. Pode importar os próximos.');
 }
 
-function puxarHorasExtras(){
-  let n = 0;
-  linhasContabilidade().forEach(f=>{
-    const ap = apuracaoDe(f);
-    if(!ap) return;
+/* ------------------------------------------------------------------
+   PUXAR OS LANÇAMENTOS DAS OUTRAS ABAS
+   Antes isto trazia só o cartão ponto, e premiação, VT, VR e quebras
+   tinham de ser copiados à mão de aba em aba — justamente as colunas
+   onde um erro de digitação vira dinheiro errado no holerite.
+   O VR do mês anterior não está na tela: é buscado na nuvem, porque é
+   a única coisa aqui que mora noutra competência.
+   ------------------------------------------------------------------ */
+async function puxarHorasExtras(){
+  const lista = linhasContabilidade();
+  const conta = {ponto:0, premiacao:0, quebra:0, vtvr:0, anterior:0};
+
+  /* VR do mês anterior: uma ida à nuvem, e só se houver alguém na tela */
+  let vrAnterior = {};
+  if(lista.length){
+    const [ano, mes] = S.competencia.split('-').map(Number);
+    const d = new Date(ano, mes - 2, 1);
+    const antes = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    carregando(true);
+    try{
+      const linhas = await api('listarFolha', {competencia:antes}, {silencioso:true});
+      linhas.forEach(l=>{ if(valorNum(l.totalVr)) vrAnterior[l.funcionarioId] = l.totalVr; });
+    }catch(e){
+      toast('Não consegui buscar o VR de '+compBonita(antes)+': '+e.message, true);
+    }
+    finally{ carregando(false); }
+  }
+
+  lista.forEach(f=>{
     const l = S.cont.linhas[f.id] || (S.cont.linhas[f.id] = {funcionarioId:f.id});
-    COLS_CONT.filter(c=>c.puxa).forEach(c=>{ if(ap[c.campo]) l[c.campo] = ap[c.campo]; });
-    n++;
+
+    /* cartão ponto */
+    const ap = apuracaoDe(f);
+    if(ap){
+      ['he50','he100','adNoturno','faltas','atrasos'].forEach(c=>{
+        if(ap[c]) l[c] = ap[c];
+      });
+      conta.ponto++;
+    }
+    /* premiação (metas batidas) e quebra de produtos */
+    const outras = comissaoDe(f);
+    if(outras){
+      if(outras.comissoes){ l.comissoes = outras.comissoes; conta.premiacao++; }
+      if(outras.quebra){ l.quebra = outras.quebra; conta.quebra++; }
+    }
+    /* VT e VR do mês, como estão na aba VT/VR */
+    const d = linhaFolhaDe(f);
+    if(d.totalVt){ l.vt = moeda(d.totalVt); conta.vtvr++; }
+    if(d.totalVr){ l.vrAtual = moeda(d.totalVr); }
+    /* VR do mês anterior */
+    if(vrAnterior[f.id]){ l.vrAnterior = vrAnterior[f.id]; conta.anterior++; }
   });
+
   desenhar();
-  toast(n ? n+' funcionário(s) preenchido(s) pela apuração.'
-          : 'Nenhuma apuração encontrada para esta competência.', !n);
+  const partes = [];
+  if(conta.ponto) partes.push(conta.ponto+' do cartão ponto');
+  if(conta.premiacao) partes.push(conta.premiacao+' com premiação');
+  if(conta.quebra) partes.push(conta.quebra+' com quebra');
+  if(conta.vtvr) partes.push(conta.vtvr+' com VT/VR');
+  if(conta.anterior) partes.push(conta.anterior+' com VR do mês anterior');
+  toast(partes.length ? 'Preenchido: ' + partes.join(' · ')
+    : 'Nada para puxar nesta competência — não há cartão ponto, premiação, '+
+      'quebras nem VT/VR lançados.', !partes.length);
 }
 
 async function salvarContabilidade(silencioso){
@@ -7479,7 +7845,7 @@ function chaveEnvio(funcId, tipo){ return funcId + '|' + tipo; }
 function pessoasDoCelular(){
   const busca = (S.busca||'').trim().toUpperCase();
   return S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=>!busca || f.nome.toUpperCase().includes(busca))
     .sort((a,b)=>{
       /* quem está faltando documento vem primeiro: é o que o gerente
@@ -7492,7 +7858,7 @@ function pessoasDoCelular(){
 
 function telaCelular(){
   const lista = pessoasDoCelular();
-  const todos = S.funcionarios.filter(f=>f.status!=='DEMITIDO');
+  const todos = S.funcionarios.filter(estaNaCasa);
   const prontos = todos.filter(f=>situacao(f)!=='vermelho').length;
   const pct = todos.length ? Math.round(prontos/todos.length*100) : 0;
   let html = `<div class="cel">
@@ -7787,7 +8153,7 @@ async function excluirNoCelular(el, id){
 
 function telaAnexar(){
   const ativos = S.funcionarios
-    .filter(f=>f.status!=='DEMITIDO')
+    .filter(estaNaCasa)
     .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
     .filter(f=> !S.busca.trim() || f.nome.toUpperCase().includes(S.busca.trim().toUpperCase()))
     /* por filial, e dentro de cada uma em ordem alfabética */
@@ -8741,7 +9107,7 @@ function lerMarcacoes(txt){
 function gradeCartao(op){
   const comp = S.competencia;
   const dias = op.dias;
-  const ops = S.funcionarios.filter(f=>f.status!=='DEMITIDO')
+  const ops = S.funcionarios.filter(estaNaCasa)
     .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'))
     .map(f=>`<option value="${esc(f.id)}" ${f.id===op.funcionarioId?'selected':''}>${esc(f.nome)}${f.filial?' · '+esc(f.filial):''}</option>`).join('');
   const semCadastro = !op.funcionarioId && op.nome;
@@ -8957,6 +9323,7 @@ function guardarResultado(item, indice){
   else {
     const antes = S.he.resultados.findIndex(r=>normalizar(r.nome)===normalizar(item.nome));
     if(antes>=0) S.he.resultados[antes] = item; else S.he.resultados.push(item);
+    aproveitarNaFolha();
   }
   S.he.resultados.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
 }
@@ -9205,6 +9572,7 @@ async function importarCartoes(todos){
           };
           if(anterior>=0) S.he.resultados[anterior] = item;
           else S.he.resultados.push(item);
+          aproveitarNaFolha();
         });
       }catch(e){ erros.push(arq.name+': '+e.message); }
     }
@@ -9251,6 +9619,13 @@ function reapurar(){
 }
 
 function recalcular(){ reapurar(); desenhar(); }
+
+/* Cartão ponto recém-importado ou recalculado: a folha passa a ter valores
+   novos para preencher sozinha. */
+function aproveitarNaFolha(){
+  S.cont.autoFeito = null;
+  preencherAutomatico();
+}
 
 /* Mexeu no cartão depois de salvar, o que está na nuvem ficou velho. */
 function marcarNaoSalvo(r){ if(r) r.salvo = false; }
