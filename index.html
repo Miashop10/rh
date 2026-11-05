@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.04b';
+  const VERSAO_APP = '2026.11.04c';
 
   const API = 'https://script.google.com/macros/s/AKfycbzkkmhUAIkqxzrabo-NN83D0AYprRCufcfkAYubSkh19dBCMZFcmyoeoB3uj3wCMo50/exec';
 
@@ -179,6 +179,10 @@ select.campo,input.campo{
 /* Os dois botões de vale são a mesma relação em dois formatos: ficam lado a
    lado, menores que os demais, para não disputarem a atenção com o Cadastrar. */
 .barra .btn.mini{white-space:nowrap}
+/* Os quatro botões de exportação em duas linhas de dois: os de vale em cima,
+   os da folha logo embaixo de cada um deles. Numa linha só não cabem junto
+   com Importar planilha e Cadastrar funcionário. */
+.exportacoes{display:grid;grid-template-columns:repeat(2,max-content);gap:6px}
 /* Aviso de versão: aparece quando o navegador teima em servir o arquivo
    antigo mesmo depois de o sistema tentar buscar o novo. */
 #faixaVersao{
@@ -2216,10 +2220,16 @@ function barraFiltros(comBotao){
     ${filtroDeDatas(comBotao ? 'admissao' : 'saida')}
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
     ${comBotao&&podeAprovar()?`
+    <div class="exportacoes">
       <button class="btn sec mini" id="folhaVale"
         title="PDF para levar ao banco: nome, CPF, dados bancários, filial e valor do vale do mês">Exportar vale</button>
       <button class="btn sec mini" id="folhaValeExcel"
-        title="Planilha para lançar em outro sistema: nome, valor, filial, Vale e a data do pagamento">Exportar vale excel</button>`:''}
+        title="Planilha para lançar em outro sistema: nome, valor, filial, Vale e a data do pagamento">Exportar vale excel</button>
+      <button class="btn sec mini" id="folhaBanco"
+        title="PDF com os dados bancários de quem recebe a folha: nome, agência, conta, banco, CPF e filial">Exportar folha</button>
+      <button class="btn sec mini" id="folhaBancoExcel"
+        title="A mesma relação em planilha, para lançar no banco">Exportar folha excel</button>
+    </div>`:''}
     ${comBotao?'<button class="btn" id="btnNovo">Cadastrar funcionário</button>':''}
   </div>`;
 }
@@ -2532,6 +2542,8 @@ function ligarDelegacao(){
     if((el = alvo('#btnNovo')))           { abrirFuncionario(null); return; }
     if((el = alvo('#verExcluidos')))      { abrirExcluidos(); return; }
     if((el = alvo('#btnImportar')))       { abrirImportacao(); return; }
+    if((el = alvo('#folhaBancoExcel')))   { exportarFolhaBancoExcel(); return; }
+    if((el = alvo('#folhaBanco')))        { exportarFolhaBancoPdf(); return; }
     if((el = alvo('#folhaValeExcel')))    { exportarValeExcel(); return; }
     if((el = alvo('#folhaVale')))         { exportarValePdf(); return; }
     if((el = alvo('#verOpcionais')))      { abrirOpcionais(); return; }
@@ -7181,6 +7193,124 @@ async function exportarFolhaPdf(){
    Dado bancário e CPF saem daqui, então é exportação de RH e MASTER,
    como as demais exportações em PDF.
    ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   RELAÇÃO BANCÁRIA DA FOLHA
+   Quem recebe salário no mês, com a conta para onde o dinheiro vai.
+   É a lista que o RH leva ao banco, e por isso sai em PDF (para
+   conferir e assinar) e em planilha (para lançar).
+   Entram os funcionários ativos — inclusive quem está de férias ou em
+   aviso prévio, que recebe salário igual. Quem saiu fica de fora.
+   ------------------------------------------------------------------ */
+function linhasDaFolhaBancaria(){
+  return funcionariosDaFolha();
+}
+
+const COLS_BANCO = [
+  {titulo:'FUNCIONÁRIO', larg:34, valor:f=>f.nome},
+  {titulo:'AGÊNCIA',     larg:12, valor:f=>f.agencia||''},
+  {titulo:'CONTA',       larg:16, valor:f=>f.conta
+     ? f.conta + (f.tipoConta==='POUPANCA' ? ' (poupança)' : '') : ''},
+  {titulo:'BANCO',       larg:16, valor:f=>f.banco||''},
+  {titulo:'CPF',         larg:16, valor:f=>f.cpf||''},
+  {titulo:'FILIAL',      larg:20, valor:f=>f.filial||''}
+];
+
+async function exportarFolhaBancoExcel(){
+  if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar.', true);
+  const lista = linhasDaFolhaBancaria();
+  if(!lista.length) return toast('Nenhum funcionário ativo nesta seleção.', true);
+  carregando(true);
+  try{
+    await usar('xlsx');
+    const ws = XLSX.utils.aoa_to_sheet(
+      [COLS_BANCO.map(c=>c.titulo)].concat(lista.map(f=>COLS_BANCO.map(c=>c.valor(f)))));
+    ws['!cols'] = COLS_BANCO.map(c=>({wch:c.larg}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
+    XLSX.writeFile(wb, 'FOLHA DADOS BANCARIOS '+compArquivo(S.competencia)+
+      sufixoFilial()+'.xlsx');
+    avisarSemBancoNaFolha(lista);
+    toast('Planilha gerada: '+lista.length+' funcionários.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+async function exportarFolhaBancoPdf(){
+  if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar.', true);
+  const lista = linhasDaFolhaBancaria();
+  if(!lista.length) return toast('Nenhum funcionário ativo nesta seleção.', true);
+  carregando(true);
+  try{
+    await usar('pdflib');
+    const {PDFDocument, StandardFonts, rgb} = PDFLib;
+    const doc = await PDFDocument.create();
+    const fonte = await doc.embedFont(StandardFonts.Helvetica);
+    const fonteB = await doc.embedFont(StandardFonts.HelveticaBold);
+    const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
+    const L=595.28, A=841.89, m=34;
+    const prop = [0.30, 0.11, 0.17, 0.15, 0.15, 0.12];
+    const larg = prop.map(p=>(L-2*m)*p);
+    const xs = []; let acc = m;
+    larg.forEach(w=>{ xs.push(acc); acc += w; });
+    const fim = acc, GAP = 5;
+    const encurta = (t, f, tam, max)=>{
+      t = String(t==null?'':t);
+      if(f.widthOfTextAtSize(t, tam) <= max) return t;
+      let r = t;
+      while(r.length > 1 && f.widthOfTextAtSize(r+'…', tam) > max) r = r.slice(0,-1);
+      return r + '…';
+    };
+    let pg, y;
+    const cabecalho = ()=>{
+      pg = doc.addPage([L,A]); y = A-40;
+      const h=15; pg.drawImage(logo,{x:m, y, width:logo.width*h/logo.height, height:h});
+      pg.drawText('Folha de pagamento · dados bancários · '+compBonita(S.competencia),
+        {x:m, y:y-22, size:12, font:fonteB, color:rgb(.06,.07,.08)});
+      const fil = S.filtroFilial==='TODAS'
+        ? null : S.filiais.find(x=>x.nome===S.filtroFilial);
+      pg.drawText((fil ? fil.nome + (fil.cnpj ? '  ·  CNPJ '+fil.cnpj : '')
+                      : 'Todas as filiais') + '  ·  ' + lista.length + ' funcionários',
+        {x:m, y:y-34, size:8, font:fonte, color:rgb(.42,.45,.5)});
+      y -= 50;
+      COLS_BANCO.forEach((c,i)=>
+        pg.drawText(encurta(c.titulo, fonteB, 7, larg[i]-GAP),
+          {x:xs[i], y, size:7, font:fonteB, color:rgb(.42,.45,.5)}));
+      y -= 7;
+      pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.7, color:rgb(.8,.83,.86)});
+      y -= 13;
+    };
+    cabecalho();
+    lista.forEach(f=>{
+      if(y < m+40) cabecalho();
+      COLS_BANCO.forEach((c,i)=>
+        pg.drawText(encurta(c.valor(f) || '—', fonte, 7.5, larg[i]-GAP),
+          {x:xs[i], y, size:7.5, font:fonte, color:rgb(.06,.07,.08)}));
+      y -= 8;
+      pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.4, color:rgb(.93,.94,.95)});
+      y -= 12;
+    });
+    if(y < m+40) cabecalho();
+    y -= 3;
+    pg.drawLine({start:{x:m,y:y+9}, end:{x:fim,y:y+9}, thickness:.7, color:rgb(.8,.83,.86)});
+    pg.drawText('TOTAL · '+lista.length+' funcionários',
+      {x:m, y, size:8, font:fonteB, color:rgb(.06,.07,.08)});
+    baixar(new Blob([await doc.save()],{type:'application/pdf'}),
+      'FOLHA DADOS BANCARIOS '+compArquivo(S.competencia)+sufixoFilial()+'.pdf');
+    avisarSemBancoNaFolha(lista);
+    toast('Relação gerada: '+lista.length+' funcionários.');
+  }catch(e){ toast(e.message, true); }
+  finally{ carregando(false); }
+}
+
+/* Sem conta o salário não é depositado — melhor saber antes de entregar. */
+function avisarSemBancoNaFolha(lista){
+  const faltam = lista.filter(f=>!f.banco || !f.agencia || !f.conta);
+  if(!faltam.length) return;
+  toast(faltam.length+' sem dados bancários completos: '+
+    faltam.slice(0,5).map(f=>f.nome.split(' ')[0]).join(', ')+
+    (faltam.length>5 ? ' e mais '+(faltam.length-5) : ''), true);
+}
+
 function linhasDoVale(){
   return funcionariosDaFolha()
     .map(f=>({f, vale: valorNum(linhaFolhaDe(f).vale)}))
