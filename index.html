@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.10b';
+  const VERSAO_APP = '2026.11.12a';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -1684,11 +1684,20 @@ function conferirVersao(doServidor, podeRecarregar){
   /* As versões são datas (2026.10.19), então comparar como texto já diz quem
      é mais nova. Só faz sentido buscar arquivo novo se o daqui for o velho. */
   /* O contrário — página nova, Apps Script antigo — é o caso de quem subiu só
-     o index.html. Quase sempre não muda nada, porque a maioria das alterações
-     é só de tela. Encher a tela de aviso amarelo todo dia por isso seria
-     barulho: as duas versões ficam lado a lado em Configurações, e é lá que
-     se confere. */
-  if(doServidor < VERSAO_APP) return false;
+     o index.html e não republicou a implantação. Isto já ficou em silêncio
+     uma vez, por eu supor que "quase sempre é só tela", e custou caro: as
+     situações Pediu demissão, Fim de contrato e Justa causa precisavam do
+     Apps Script novo, e com o antigo no ar o status voltava a Empregado sem
+     erro nenhum — o RH marcava o desligamento e o funcionário continuava na
+     aba Funcionários, sem nada na tela que explicasse por quê. A página não
+     tem como saber quais mudanças dependem do servidor, então avisa sempre. */
+  if(doServidor < VERSAO_APP){
+    avisarVersao(`A página está na versão <b>${esc(VERSAO_APP)}</b>, mas o
+      servidor (Apps Script) ainda está na <b>${esc(doServidor)}</b>.
+      Republique a implantação do Apps Script com a versão nova — até lá,
+      o que depende do servidor pode não funcionar.`, false);
+    return false;
+  }
   let jaTentou = '';
   try{ jaTentou = sessionStorage.getItem(CHAVE_RECARGA) || ''; }catch(e){}
   if(podeRecarregar && jaTentou !== doServidor){
@@ -3771,15 +3780,29 @@ function abrirFuncionario(id, extra){
          não entra nela, para não andar junto em nenhuma outra tela */
       const paraLista = Object.assign({}, dados);
       CAMPOS_FICHA.forEach(c=> delete paraLista[c]);
+      /* A situação que vale é a que o servidor gravou, não a que a tela
+         pediu. Confiar no pedido escondia um desencontro inteiro: com um
+         Apps Script antigo no ar, o servidor devolvia o status a Empregado
+         e a tela seguia mostrando o desligamento, com aviso de sucesso e
+         tudo — até o próximo carregamento, quando o funcionário reaparecia
+         na aba Funcionários sem explicação. */
+      if(r.status) paraLista.status = r.status;
       const salvo = Object.assign({}, f, paraLista, {id: r.id});
       const i = S.funcionarios.findIndex(x=>x.id===r.id);
       if(i>=0) S.funcionarios[i] = salvo; else S.funcionarios.push(salvo);
       S.destacar = r.id;
       desenhar();
       if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
-      toast(STATUS_SAIU.includes(dados.status) ? 'Funcionário movido para Ex-funcionários.'
-            : dados.status==='EMPREGADO' ? 'Cadastro salvo.'
-            : 'Situação alterada para '+SITUACOES[dados.status].rotulo+'. Continua na aba Funcionários.');
+      if(r.status && r.status !== dados.status){
+        toast('O servidor gravou a situação como "'+
+          ((SITUACOES[r.status]||{}).rotulo || r.status)+'", e não como "'+
+          ((SITUACOES[dados.status]||{}).rotulo || dados.status)+
+          '". O Apps Script publicado está desatualizado — republique a implantação.', true);
+      } else {
+        toast(STATUS_SAIU.includes(salvo.status) ? 'Funcionário movido para Ex-funcionários.'
+              : salvo.status==='EMPREGADO' ? 'Cadastro salvo.'
+              : 'Situação alterada para '+SITUACOES[salvo.status].rotulo+'. Continua na aba Funcionários.');
+      }
     }catch(e){ toast(e.message,true); }
     finally{ carregando(false); }
   };
