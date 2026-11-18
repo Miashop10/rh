@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.12a';
+  const VERSAO_APP = '2026.11.18b';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -1241,7 +1241,6 @@ const ROTULO_ABA = {
   ANEXAR:'Anexar documentos',
   FUNCIONARIOS:'Funcionários',
   EX_FUNCIONARIOS:'Ex-funcionários',
-  PENDENCIAS:'Pendências',
   HORAS_EXTRAS:'Horas extras',
   COMISSOES:'Premiação',
   QUEBRAS:'Quebras',
@@ -1992,6 +1991,53 @@ const SITUACOES = {
 const STATUS_SAIU = ['DEMITIDO','JUSTA_CAUSA','PEDIU_DEMISSAO','FIM_CONTRATO'];
 function saiu(f){ return STATUS_SAIU.includes((f && f.status) || ''); }
 function estaNaCasa(f){ return !saiu(f); }
+
+/* Quem entra nas relações de pagamento — vale, folha e dados bancários.
+   Não é a mesma coisa que "não saiu da empresa": quem está de FÉRIAS não
+   entra (as férias são pagas por fora, no recibo próprio), e quem saiu em
+   qualquer das quatro situações de desligamento também não. Sobram
+   EMPREGADO e AVISO, que é quem está trabalhando no mês.
+   As telas continuam mostrando férias e aviso com o selo — o RH precisa
+   ver essa gente. O que esta regra decide é só quem SAI nos arquivos. */
+/* Aviso prévio trabalhado, art. 488 da CLT: o horário cai duas horas por
+   dia, ou o funcionário sai sete dias antes, sem trabalhar. A escolha é do
+   empregado e muda o cálculo do mês. */
+const AVISO_TIPOS = [
+  {id:'2H', rotulo:'2 horas a menos por dia', minutos:120},
+  {id:'7D', rotulo:'7 dias a menos no fim',   minutos:0}
+];
+function avisoTipoDe(f){
+  if(!f || f.status !== 'AVISO') return null;
+  return AVISO_TIPOS.find(a=>a.id === (f.avisoTipo || '2H')) || AVISO_TIPOS[0];
+}
+/* Minutos que o dia pode ficar abaixo da jornada sem virar atraso, por
+   causa do aviso prévio. Só a modalidade das 2 horas reduz o expediente. */
+function reducaoAviso(f){
+  const t = avisoTipoDe(f);
+  return t ? t.minutos : 0;
+}
+
+const STATUS_RECEBE = ['EMPREGADO', 'AVISO'];
+function recebeFolha(f){ return STATUS_RECEBE.includes((f && f.status) || ''); }
+
+/* Cadastro que diz uma coisa e mostra outra: tem data de saída preenchida
+   mas a situação continua como quem está trabalhando. Foi o que o Apps
+   Script antigo produziu em novembro, ao rebaixar os três status novos
+   para EMPREGADO. Esses não são pegos por filtro nenhum — a planilha diz
+   que estão empregados — então é preciso apontá-los pelo nome. */
+function desligamentoPelaMetade(lista){
+  return (lista || S.funcionarios).filter(f=>
+    f && f.dataDemissao && String(f.dataDemissao).trim() && !saiu(f));
+}
+function avisarDesligamentoPelaMetade(){
+  const meio = desligamentoPelaMetade();
+  if(!meio.length) return;
+  toast('Atenção: '+meio.length+' cadastro(s) com data de saída preenchida '+
+    'mas situação de quem trabalha, então ainda entram nas relações: '+
+    meio.slice(0,6).map(f=>f.nome).join(', ')+
+    (meio.length>6 ? ' e outros' : '')+
+    '. Marque a situação de desligamento de novo nesses cadastros.', true);
+}
 function selo(status){
   const s = SITUACOES[status] || SITUACOES.EMPREGADO;
   return `<span class="selo ${s.classe}">${s.rotulo}</span>`;
@@ -2126,8 +2172,15 @@ function desenhar(){
   /* CONTABILIDADE virou seção da folha: some do topo, e quem ainda tinha a
      aba marcada no cadastro passa a entrar pela Folha de pagamento. */
   if(S.aba==='CONTABILIDADE') S.aba='FOLHA';
+  /* Pendências não existe mais: quem tinha essa aba marcada no cadastro
+     entra pela Anexar, em vez de cair numa tela em branco. */
+  if(S.aba==='PENDENCIAS'){
+    S.aba = S.sessao.abas.includes('ANEXAR') ? 'ANEXAR'
+          : (S.sessao.abas.find(a=>a!=='PENDENCIAS' && a!=='ADMIN') || 'FUNCIONARIOS');
+  }
   const nav = document.getElementById('abas');
-  nav.innerHTML = S.sessao.abas.filter(a=>a!=='ADMIN' && a!=='CONTABILIDADE').map(a=>
+  nav.innerHTML = S.sessao.abas
+    .filter(a=>a!=='ADMIN' && a!=='CONTABILIDADE' && a!=='PENDENCIAS').map(a=>
     `<button class="aba ${a===S.aba?'on':''}" data-aba="${a}">${ROTULO_ABA[a]||a}</button>`
   ).join('');
   nav.querySelectorAll('.aba').forEach(b=> b.onclick = ()=>{
@@ -2170,7 +2223,6 @@ function desenhar(){
   if(S.aba==='ANEXAR') c.innerHTML = aviso + telaAnexar();
   else if(S.aba==='FUNCIONARIOS') c.innerHTML = aviso + telaFuncionarios();
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
-  else if(S.aba==='PENDENCIAS') c.innerHTML = aviso + telaPendencias();
   else if(S.aba==='HORAS_EXTRAS') c.innerHTML = telaHorasExtras();
   else if(S.aba==='COMISSOES') c.innerHTML = telaComissoes();
   else if(S.aba==='QUEBRAS') c.innerHTML = telaQuebras();
@@ -2454,64 +2506,8 @@ function telaEx(){
 }
 
 /* ---------- ABA 3: PENDÊNCIAS ---------- */
-function telaPendencias(){
-  const ativos = S.funcionarios.filter(estaNaCasa);
-  const tipos = S.config.tiposObrigatorios;
-  const filiais = [...new Set(ativos.map(f=>f.filial))].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true}));
-  let html = `<div class="aviso info">Faltas por filial na competência <b>${compBonita(S.competencia)}</b> ·
-    clique numa filial para ver quem está devendo</div>`;
-  if(!filiais.length) return html + vazio('Sem dados','Cadastre funcionários para acompanhar as pendências.');
-
-  html += `<div class="painel"><table class="matriz"><thead><tr>
-    <th>Filial</th>${tipos.map(t=>`<th>${esc(t)}</th>`).join('')}<th>A conferir</th></tr></thead><tbody>`;
-
-  filiais.forEach(fil=>{
-    const lista = ativos.filter(f=>f.filial===fil);
-    const cels = tipos.map(t=>{
-      const falta = lista.filter(f=> tiposDe(f).includes(t) &&
-        !docsDe(f.id,S.competencia).find(d=>d.tipo===t)).length;
-      return `<td class="${falta?'cel-falta':'cel-ok'}">${falta? falta+' falta'+(falta>1?'m':''):'ok'}</td>`;
-    }).join('');
-    const conferir = lista.filter(f=>situacao(f)==='ambar').length;
-    const aberta = S.pendAberta === fil;
-    html += `<tr class="linha-pend ${aberta?'aberta':''}" data-pend="${esc(fil)}">
-      <td><span class="seta">${aberta?'▾':'▸'}</span> ${esc(fil)}
-        <span style="color:var(--apagado);font-weight:400">(${lista.length})</span></td>
-      ${cels}<td class="${conferir?'cel-falta':'cel-ok'}">${conferir||'ok'}</td></tr>`;
-
-    if(aberta) html += detalhePendencia(fil, lista, tipos);
-  });
-  html += '</tbody></table></div>';
-  return html;
-}
-
-function detalhePendencia(fil, lista, tipos){
-  const devendo = lista.map(f=>{
-    const meus = docsDe(f.id, S.competencia);
-    const seus = tiposDe(f);
-    const faltam = seus.filter(t=>!meus.find(d=>d.tipo===t));
-    const conferir = meus.filter(d=>seus.includes(d.tipo) && d.status!=='APROVADO');
-    return {f, faltam, conferir};
-  }).filter(x=> x.faltam.length || x.conferir.length)
-    .sort((a,b)=> b.faltam.length - a.faltam.length || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
-
-  if(!devendo.length){
-    return `<tr class="detalhe-pend"><td colspan="${tipos.length+2}">
-      <div class="cx-pend" style="color:var(--verde)">Tudo anexado e conferido em ${esc(fil)}.</div></td></tr>`;
-  }
-
-  return `<tr class="detalhe-pend"><td colspan="${tipos.length+2}">
-    <div class="cx-pend">
-      ${devendo.map(x=>`
-      <div class="linha-pend-func">
-        <span class="bolinha p-${situacao(x.f)}"></span>
-        <b>${esc(x.f.nome)}</b>
-        ${x.faltam.length ? `<span class="pend-falta">falta ${x.faltam.map(esc).join(', ')}</span>` : ''}
-        ${x.conferir.length ? `<span class="pend-conferir">a conferir ${x.conferir.map(d=>esc(d.tipo)).join(', ')}</span>` : ''}
-        <button class="btn sec mini" data-docs="${x.f.id}" style="margin-left:auto">Documentos</button>
-      </div>`).join('')}
-    </div></td></tr>`;
-}
+/* A aba Pendências saiu a pedido do RH: não era usada. O que falta
+   anexar continua à vista na própria aba Anexar, por funcionário. */
 
 /* A área de rolagem vai do topo da tabela até a base da janela. Calculada no
    CSS por um valor fixo, ela ultrapassava a tela quando a barra de filtros
@@ -2590,16 +2586,44 @@ function ligarEventos(){
 /* ==================================================================
    MODAIS — base
    ================================================================== */
-function modal(html, larga){
+/* soNoX: a janela fecha apenas no ✕. Serve para as que têm formulário.
+   Clicar na área escura em volta e apertar Esc fechavam na hora, e quem
+   voltava de outra aba do navegador perdia tudo que tinha digitado: o
+   clique para trazer o foco de volta cai justamente nessa área escura.
+   Fechar sem querer não pode custar meia hora de digitação. */
+function modal(html, larga, soNoX){
   const el = document.createElement('div');
   el.className='fundo';
   el.innerHTML = `<div class="modal ${larga?'larga':''}">${html}</div>`;
-  el.addEventListener('mousedown', e=>{ if(e.target===el) el.remove(); });
+  /* Nas outras janelas o clique fora e o Esc continuam fechando — mas não
+     quando há algo digitado e ainda não salvo. Comparar com o valor inicial
+     do campo é o que distingue "o RH mexeu aqui" de "está como veio". */
+  const temCoisaDigitada = ()=>{
+    const campos = el.querySelectorAll('input, textarea');
+    for(const i of campos){
+      if(i.type==='checkbox' || i.type==='radio'){
+        if(i.checked !== i.defaultChecked) return true;
+      } else if(i.type!=='file' && i.value !== i.defaultValue) return true;
+    }
+    return false;
+  };
+  const tentarFechar = ()=>{
+    if(soNoX) return false;
+    if(temCoisaDigitada()){
+      toast('Há dados digitados aqui. Feche no ✕ se quiser mesmo descartar.', true);
+      return false;
+    }
+    el.remove();
+    return true;
+  };
+  el.addEventListener('mousedown', e=>{ if(e.target===el) tentarFechar(); });
   document.getElementById('modais').appendChild(el);
   const f = el.querySelector('.fechar');
   if(f) f.onclick = ()=>el.remove();
   document.addEventListener('keydown', function fechaEsc(ev){
-    if(ev.key==='Escape'){ el.remove(); document.removeEventListener('keydown', fechaEsc); }
+    if(ev.key!=='Escape') return;
+    if(!el.isConnected){ document.removeEventListener('keydown', fechaEsc); return; }
+    if(tentarFechar()) document.removeEventListener('keydown', fechaEsc);
   });
   return el;
 }
@@ -3564,6 +3588,12 @@ function reaisPorExtenso(v){
 
 
 function abrirFuncionario(id, extra){
+  /* Uma ficha de cadastro por vez. Agora que ela não fecha sozinha, abrir
+     outra empilhava janela sobre janela — e a de baixo, invisível e ainda
+     viva, continuava respondendo. Pela tela não dá para clicar em "editar"
+     de outra linha com uma ficha aberta, então aqui não se perde digitação:
+     só se recolhe a janela que o código deixou para trás. */
+  document.querySelectorAll('#modais .fundo.ficha-cadastro').forEach(x=>x.remove());
   const f = id ? S.funcionarios.find(x=>x.id===id)
     : Object.assign({nome:'',filial:'',cargo:'',dataAdmissao:'',dataInicio:'',dataDemissao:'',
                      status:'EMPREGADO',observacoes:'',cpf:'',banco:'',agencia:'',conta:'',
@@ -3597,6 +3627,12 @@ function abrirFuncionario(id, extra){
         <div id="boxDem" style="display:${saiu(f)?'block':'none'}">
           <label class="campo-lbl" for="fDem">Data de saída</label>
           <input class="entrada" type="date" id="fDem" value="${esc(f.dataDemissao)}"></div>
+        <div id="boxAviso" style="display:${f.status==='AVISO'?'block':'none'}">
+          <label class="campo-lbl" for="fAvisoTipo">Modalidade do aviso prévio</label>
+          <select class="entrada" id="fAvisoTipo">
+            ${AVISO_TIPOS.map(a=>
+              `<option value="${a.id}" ${(f.avisoTipo||'2H')===a.id?'selected':''}>${a.rotulo}</option>`).join('')}
+          </select></div>
       </div>
 
       <div class="titulo-grupo">Dados bancários e documento</div>
@@ -3622,6 +3658,10 @@ function abrirFuncionario(id, extra){
             <option value="SIM" ${f.recebeVale!=='NAO'?'selected':''}>Sim</option>
             <option value="NAO" ${f.recebeVale==='NAO'?'selected':''}>Não</option>
           </select></div>
+        <div id="boxValeValor" style="display:${f.recebeVale==='NAO'?'none':'block'}">
+          <label class="campo-lbl" for="fValeValor">Valor do vale (R$)</label>
+          <input class="entrada" id="fValeValor" inputmode="decimal"
+            value="${esc(f.valePadrao||'')}" placeholder="300,00"></div>
         <div class="full">
           <label class="campo-lbl" for="fGrupo">Grupo de VT e VR</label>
           <select class="entrada" id="fGrupo">
@@ -3656,11 +3696,20 @@ function abrirFuncionario(id, extra){
         title="Gera o termo de consentimento LGPD preenchido com os dados deste funcionário">Exportar Termo LGPD</button>`:''}
       <button class="btn sec" id="fCancelar">Cancelar</button>
       <button class="btn" id="fSalvar">Salvar</button>
-    </div>`);
+    </div>`, false, true);
+  el.classList.add('ficha-cadastro');
+
+  const selVale = el.querySelector('#fVale');
+  selVale.onchange = ()=> el.querySelector('#boxValeValor').style.display =
+    selVale.value === 'NAO' ? 'none' : 'block';
 
   const st = el.querySelector('#fStatus');
-  st.onchange = ()=> el.querySelector('#boxDem').style.display =
-    STATUS_SAIU.includes(st.value) ? 'block' : 'none';
+  st.onchange = ()=>{
+    el.querySelector('#boxDem').style.display =
+      STATUS_SAIU.includes(st.value) ? 'block' : 'none';
+    el.querySelector('#boxAviso').style.display =
+      st.value === 'AVISO' ? 'block' : 'none';
+  };
 
   const mostrarCnpj = ()=>{
     const fil = S.filiais.find(x=>x.nome===el.querySelector('#fFilial').value);
@@ -3749,8 +3798,14 @@ function abrirFuncionario(id, extra){
       conta: el.querySelector('#fConta').value.trim(),
       tipoConta: el.querySelector('#fTipoConta').value,
       recebeVale: el.querySelector('#fVale').value,
+      /* O valor passa a nascer no cadastro. Antes só existia depois de alguém
+         digitar o vale na aba Folha, e por isso o recém-admitido ficava de
+         fora da relação mesmo marcado como "recebe vale". */
+      valePadrao: el.querySelector('#fVale').value === 'NAO' ? ''
+                : el.querySelector('#fValeValor').value.trim(),
       status: st.value,
       dataDemissao: STATUS_SAIU.includes(st.value) ? el.querySelector('#fDem').value : '',
+      avisoTipo: st.value === 'AVISO' ? el.querySelector('#fAvisoTipo').value : '',
       observacoes: el.querySelector('#fObs').value
     };
     /* a ficha completa só vai junto depois de ter sido carregada: salvar o
@@ -3773,7 +3828,9 @@ function abrirFuncionario(id, extra){
     carregando(true);
     try{
       const r = await api('salvarFuncionario', {funcionario:dados});
-      el.remove();
+      /* A ficha fica aberta depois de salvar. Fechava sozinha, e quem estava
+         no meio de um cadastro longo tinha de reabrir e procurar o nome de
+         novo a cada salvamento. Agora só o ✕ fecha. */
       /* o servidor já confirmou: atualiza a tela com o que foi salvo, em vez de
          baixar a base inteira de novo só para ver a mesma informação */
       /* a lista em memória é a mesma que o servidor devolve: a ficha completa
@@ -3793,6 +3850,17 @@ function abrirFuncionario(id, extra){
       S.destacar = r.id;
       desenhar();
       if(extra && extra.aoSalvar) extra.aoSalvar(r.id);
+      /* Cadastro novo que acabou de nascer: a ficha passa a ser a dele. Sem
+         isto, um segundo Salvar na mesma janela — agora que ela não fecha —
+         criaria o funcionário outra vez. */
+      const eraNovo = !id;
+      id = r.id;
+      if(eraNovo){
+        const topo = el.querySelector('.modal-topo small');
+        const tit = el.querySelector('.modal-topo h2');
+        if(topo) topo.textContent = 'Editar cadastro';
+        if(tit) tit.textContent = salvo.nome;
+      }
       if(r.status && r.status !== dados.status){
         toast('O servidor gravou a situação como "'+
           ((SITUACOES[r.status]||{}).rotulo || r.status)+'", e não como "'+
@@ -4915,7 +4983,7 @@ function linhaUsuario(u, novo){
   const quantos = u.papel !== 'GERENTE' || !u.filial
     ? null
     : S.funcionarios.filter(f=>chaveFilial(f.filial) === chaveFilial(u.filial)).length;
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','PENDENCIAS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','CANDIDATOS'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','CANDIDATOS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -6999,8 +7067,9 @@ function valorDaCelulaFolha(f, col){
 }
 
 async function exportarFolhaExcel(){
-  const lista = funcionariosDaFolha();
+  const lista = funcionariosDaFolha().filter(recebeFolha);
   if(!lista.length) return toast('Nenhum funcionário nesta seleção.', true);
+  avisarDesligamentoPelaMetade();
 
   /* uma aba por filial: o cabeçalho traz o CNPJ, e com todas as filiais
      juntas não haveria um CNPJ só para pôr lá */
@@ -7225,7 +7294,7 @@ async function exportarFolhaPdf(){
    aviso prévio, que recebe salário igual. Quem saiu fica de fora.
    ------------------------------------------------------------------ */
 function linhasDaFolhaBancaria(){
-  return funcionariosDaFolha();
+  return funcionariosDaFolha().filter(recebeFolha);
 }
 
 const COLS_BANCO = [
@@ -7242,6 +7311,7 @@ async function exportarFolhaBancoExcel(){
   if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar.', true);
   const lista = linhasDaFolhaBancaria();
   if(!lista.length) return toast('Nenhum funcionário ativo nesta seleção.', true);
+  avisarDesligamentoPelaMetade();
   carregando(true);
   try{
     await usar('xlsx');
@@ -7262,6 +7332,7 @@ async function exportarFolhaBancoPdf(){
   if(!podeAprovar()) return toast('Somente GERENTE RH ou MASTER podem exportar.', true);
   const lista = linhasDaFolhaBancaria();
   if(!lista.length) return toast('Nenhum funcionário ativo nesta seleção.', true);
+  avisarDesligamentoPelaMetade();
   carregando(true);
   try{
     await usar('pdflib');
@@ -7334,10 +7405,30 @@ function avisarSemBancoNaFolha(lista){
     (faltam.length>5 ? ' e mais '+(faltam.length-5) : ''), true);
 }
 
+/* Quem recebe vale mensal entra na relação, tenha ou não valor lançado.
+   Antes a relação exigia valor maior que zero, e quem acabara de ser
+   cadastrado desaparecia sem nenhum aviso: o valor do vale só passava a
+   existir depois de alguém digitar o mês dele na aba Folha. Omitir em
+   silêncio é o pior desfecho possível aqui — o RH só descobre pelo
+   funcionário que não recebeu. Sem valor, a linha sai marcada e o total
+   não a soma. */
 function linhasDoVale(){
   return funcionariosDaFolha()
+    .filter(recebeFolha)
+    .filter(f=> f.recebeVale !== 'NAO')
     .map(f=>({f, vale: valorNum(linhaFolhaDe(f).vale)}))
-    .filter(x=>x.vale > 0);
+    .map(x=> Object.assign(x, {semValor: !(x.vale > 0)}));
+}
+/* Os que entram na relação sem valor: o RH precisa saber quem são antes de
+   levar o arquivo ao banco. */
+function avisarValeSemValor(itens){
+  const faltam = itens.filter(x=>x.semValor);
+  if(!faltam.length) return;
+  toast(faltam.length+' funcionário(s) na relação sem valor de vale lançado em '+
+    compBonita(S.competencia)+': '+
+    faltam.slice(0,6).map(x=>x.f.nome).join(', ')+
+    (faltam.length>6 ? ' e outros' : '')+
+    '. Lance o valor no cadastro ou na aba Folha de pagamento.', true);
 }
 
 /* Os botões de vale ficam na aba Funcionários, que não carrega a folha.
@@ -7368,8 +7459,10 @@ async function exportarValePdf(){
   if(!await garantirFolhaDaCompetencia()) return;
   const itens = linhasDoVale();
   if(!itens.length){
-    return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
+    return toast('Nenhum funcionário marcado como "recebe vale mensal" nesta seleção.', true);
   }
+  avisarValeSemValor(itens);
+  avisarDesligamentoPelaMetade();
   /* Faltando dado bancário, o banco devolve a remessa. Melhor avisar agora,
      pelo nome, do que o RH descobrir no caixa. */
   const incompletos = itens.filter(x=>!x.f.banco || !x.f.agencia || !x.f.conta);
@@ -7414,6 +7507,7 @@ async function exportarValePdf(){
     };
 
     const totalGeral = itens.reduce((s,x)=>s + x.vale, 0);
+    const semValorQtd = itens.filter(x=>x.semValor).length;
     let pg, y, pagina = 0;
     const cabecalho = ()=>{
       pg = doc.addPage([L,A]); y = A-40; pagina++;
@@ -7436,10 +7530,12 @@ async function exportarValePdf(){
     };
     cabecalho();
 
-    itens.forEach(({f, vale})=>{
+    itens.forEach(({f, vale, semValor})=>{
       if(y < m+40) cabecalho();
+      /* sem valor lançado: a linha sai, mas dizendo o que falta — assim o
+         RH vê o nome em vez de não vê-lo */
       const valores = [f.nome, f.cpf||'—', f.filial||'—', f.banco||'—',
-                       f.agencia||'—', f.conta||'—', moeda(vale)];
+                       f.agencia||'—', f.conta||'—', semValor ? 'a lançar' : moeda(vale)];
       valores.forEach((t,i)=> escrever(t, i, y, i===6 ? fonteB : fonte, 7.5));
       y -= 8;
       pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.4, color:rgb(.93,.94,.95)});
@@ -7449,7 +7545,8 @@ async function exportarValePdf(){
     if(y < m+40) cabecalho();
     y -= 3;
     pg.drawLine({start:{x:m,y:y+9}, end:{x:fim,y:y+9}, thickness:.7, color:rgb(.8,.83,.86)});
-    escrever('TOTAL · '+itens.length+(itens.length===1?' funcionário':' funcionários'),
+    escrever('TOTAL · '+itens.length+(itens.length===1?' funcionário':' funcionários')+
+      (semValorQtd ? ' · '+semValorQtd+' sem valor lançado' : ''),
              0, y, fonteB, 8);
     escrever('R$ '+moeda(totalGeral), 6, y, fonteB, 8);
 
@@ -7483,8 +7580,10 @@ async function exportarValeExcel(){
   if(!await garantirFolhaDaCompetencia()) return;
   const itens = linhasDoVale();
   if(!itens.length){
-    return toast('Nenhum funcionário com vale lançado em '+compBonita(S.competencia)+'.', true);
+    return toast('Nenhum funcionário marcado como "recebe vale mensal" nesta seleção.', true);
   }
+  avisarValeSemValor(itens);
+  avisarDesligamentoPelaMetade();
   carregando(true);
   try{
     await usar('xlsx');
@@ -7493,7 +7592,11 @@ async function exportarValeExcel(){
     /* O valor sai negativo: nesta planilha o vale é saída de dinheiro, e é
        assim que o sistema de destino espera receber. No PDF, que é para
        conferir e assinar, ele continua positivo. */
-    const linhas = itens.map(({f, vale})=> [f.nome, -vale, f.filial||'', 'Vale', data]);
+    /* Sem valor lançado, a célula vai VAZIA e não como zero: zero entraria
+       no sistema do banco como um lançamento de verdade, e vazio é o que
+       diz "ainda falta". O nome aparece de todo modo. */
+    const linhas = itens.map(({f, vale, semValor})=>
+      [f.nome, semValor ? '' : -vale, f.filial||'', 'Vale', data]);
     const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
     ws['!cols'] = [{wch:36},{wch:15},{wch:22},{wch:12},{wch:12}];
     /* a coluna do dinheiro com duas casas, senão o Excel mostra 180 e 180,5 */
@@ -7506,7 +7609,9 @@ async function exportarValeExcel(){
     const sufixo = S.filtroFilial==='TODAS' ? '' : ' '+S.filtroFilial;
     XLSX.writeFile(wb, 'VALE '+compArquivo(S.competencia)+sufixo+'.xlsx');
     const total = itens.reduce((s,x)=>s+x.vale, 0);
-    toast('Planilha de vale gerada: '+itens.length+' funcionários, R$ '+moeda(total)+
+    const semV = itens.filter(x=>x.semValor).length;
+    toast('Planilha de vale gerada: '+itens.length+' funcionários'+
+      (semV ? ' ('+semV+' sem valor, em branco na planilha)' : '')+', R$ '+moeda(total)+
           ', com data '+data+'.');
   }catch(e){ toast(e.message, true); }
   finally{ carregando(false); }
@@ -9086,7 +9191,13 @@ function resumoCalculo(c){
 }
 
 /* ---------- apuração ---------- */
-function apurar(cartao, cfg, filial){
+/* O quarto parâmetro é o funcionário, e serve a uma coisa só: quem está em
+   aviso prévio na modalidade das duas horas cumpre um expediente menor por
+   lei, então sair mais cedo não é atraso. A redução entra apenas no desconto
+   — ela NÃO vira hora extra para quem trabalhar o dia inteiro, porque a
+   jornada contratual continua a mesma e o RH não pediu para pagar isso. */
+function apurar(cartao, cfg, filial, func){
+  const reduzAviso = reducaoAviso(func);
   const notIni = horaParaMin(cfg.noturnoIni), notFim = horaParaMin(cfg.noturnoFim);
   const jornadaFixa = horaParaMin(cfg.jornada);
   /* Sábado tem a jornada que o cálculo diz, e só ela. Loja de rua que fecha
@@ -9101,6 +9212,7 @@ function apurar(cartao, cfg, filial){
   const r = {
     trabalhado:0, he50d:0, he50n:0, he100d:0, he100n:0, noturno:0,
     atrasos:0, diasAtraso:0, diasTrabalhados:0, diasFalta:0, diasFolga:0, diasAbono:0,
+    perdoadoAviso:0,
     diasFeriado:0, abonadas:0,
     alertas:[], detalhe:[]
   };
@@ -9206,7 +9318,12 @@ function apurar(cartao, cfg, filial){
 
     let atraso = 0;
     if(base > 0){
-      const resta = faltou - coberto;
+      /* Aviso prévio de 2 horas: o expediente desse dia é menor, então as
+         duas primeiras horas que faltam estão cobertas pela lei. O que
+         passar delas continua sendo atraso como em qualquer outro dia. */
+      const perdoado = Math.min(reduzAviso, Math.max(0, faltou - coberto));
+      if(perdoado) r.perdoadoAviso += perdoado;
+      const resta = faltou - coberto - perdoado;
       if(resta > margem){ atraso = resta; r.atrasos += resta; r.diasAtraso++; }
     }
     r.detalhe.push(Object.assign({}, d, {
@@ -9385,8 +9502,9 @@ function gradeCartao(op){
   };
 
   const atualizar = ()=>{
+    const doCartao = S.funcionarios.find(x=>x.id===op.funcionarioId) || null;
     const r = apurar({nome:'', dias: montar()}, calculoPor(op.calculoId),
-      (S.funcionarios.find(x=>x.id===op.funcionarioId)||{}).filial || op.filial || '');
+      (doCartao||{}).filial || op.filial || '', doCartao);
     r.detalhe.forEach((d,i)=>{
       const cel = q('#mCalc'+i);
       if(!cel) return;
@@ -9412,6 +9530,8 @@ function gradeCartao(op){
       <div><b style="color:var(--verde)">${minParaHora(r.he100)}</b> extras 100%</div>
       <div><b>${minParaHora(r.noturno)}</b> adicional noturno</div>
       <div><b style="color:var(--vermelho)">${minParaHora(r.atrasos)}</b> atrasos</div>
+      ${r.perdoadoAviso ? `<div><b>${minParaHora(r.perdoadoAviso)}</b> não descontadas
+        (aviso prévio, 2 h por dia)</div>` : ''}
       <div><b style="color:${r.diasFalta?'var(--vermelho)':'inherit'}">${r.diasFalta}</b> faltas</div>
       <div><b>${r.diasFolga}</b> folgas</div>
       ${r.diasFeriado?`<div><b>${r.diasFeriado}</b> feriados</div>`:''}
@@ -9447,7 +9567,7 @@ function gradeCartao(op){
       funcionarioId: f ? f.id : '', filial: f ? f.filial : '', cargo: f ? f.cargo : (op.cargo||''),
       periodoIni: cartao.periodoIni, periodoFim: cartao.periodoFim,
       calculoId: op.calculoId, observacoes: q('#mObs').value.trim(),
-      ap: apurar(cartao, calculoPor(op.calculoId), f ? f.filial : '')
+      ap: apurar(cartao, calculoPor(op.calculoId), f ? f.filial : '', f)
     };
     guardarResultado(item, op.indice);
 
@@ -9633,7 +9753,8 @@ function ligarHorasExtras(){
     const r = S.he.resultados[+x.dataset.calc];
     r.calculoId = x.value;
     marcarNaoSalvo(r);
-    r.ap = apurar(r.cartao, calculoPor(r.calculoId), filialDoResultado(r));
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId), filialDoResultado(r),
+      funcDoResultado(r));
     desenhar();
   });
   document.querySelectorAll('[data-calc]').forEach(x=> x.onclick = ev=>ev.stopPropagation());
@@ -9721,7 +9842,7 @@ async function importarCartoes(todos){
             funcionarioId: f?f.id:'', filial: f?f.filial:'', cargo: (f&&f.cargo)||cart.cargo,
             periodoIni: cart.periodoIni, periodoFim: cart.periodoFim,
             calculoId: S.he.calculoId,
-            ap: apurar(cart, calculoPor(S.he.calculoId), f?f.filial:'')
+            ap: apurar(cart, calculoPor(S.he.calculoId), f?f.filial:'', f)
           };
           if(anterior>=0) S.he.resultados[anterior] = item;
           else S.he.resultados.push(item);
@@ -9764,10 +9885,20 @@ function filialDoResultado(r){
 
 /* Refaz as contas sem redesenhar — usado também quando a carga do servidor
    traz grupos ou filiais diferentes. */
+/* O cartão é identificado pelo id quando o nome bateu com um cadastro; se
+   não bateu, pelo nome, que é como o arquivo chega. */
+function funcDoResultado(r){
+  if(!r) return null;
+  if(r.funcionarioId){
+    const achado = S.funcionarios.find(f=>f.id === r.funcionarioId);
+    if(achado) return achado;
+  }
+  return S.funcionarios.find(f=>normalizar(f.nome) === normalizar(r.nome || '')) || null;
+}
 function reapurar(){
   S.he.resultados.forEach(r=>{
     r.filial = filialDoResultado(r);
-    r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial);
+    r.ap = apurar(r.cartao, calculoPor(r.calculoId), r.filial, funcDoResultado(r));
   });
 }
 
@@ -9797,6 +9928,8 @@ function detalheHoras(i){
         <div><b style="color:var(--verde)">${minParaHora(r.ap.he100)}</b> extras 100%</div>
         <div><b>${minParaHora(r.ap.noturno)}</b> adicional noturno</div>
         <div><b style="color:var(--vermelho)">${minParaHora(r.ap.atrasos)}</b> atrasos em ${r.ap.diasAtraso} dia(s)</div>
+        ${r.ap.perdoadoAviso ? `<div><b>${minParaHora(r.ap.perdoadoAviso)}</b> não descontadas
+          — aviso prévio na modalidade de 2 horas a menos</div>` : ''}
         <div><b style="color:${r.ap.diasFalta?'var(--vermelho)':'inherit'}">${r.ap.diasFalta}</b> faltas</div>
         <div><b>${r.ap.diasFolga||0}</b> folgas</div>
         ${r.ap.diasFeriado?`<div><b>${r.ap.diasFeriado}</b> feriados</div>`:''}
