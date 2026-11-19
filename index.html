@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.18b';
+  const VERSAO_APP = '2026.11.18c';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -259,6 +259,17 @@ select.campo,input.campo{
 .fechar:hover{background:#f0f2f5;color:var(--tinta)}
 .modal-corpo{padding:20px}
 .modal-pe{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--linha);flex-wrap:wrap}
+/* Prévia da exportação: o arquivo na tela antes de descer para o computador. */
+.previa-corpo{min-height:50vh}
+.previa-pdf{max-height:68vh;overflow:auto;background:var(--fundo2);border:1px solid var(--linha);border-radius:8px;padding:10px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.previa-pagina{max-width:100%;height:auto;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18);border-radius:3px}
+.previa-rolagem{max-height:60vh;overflow:auto;border:1px solid var(--linha);border-radius:8px}
+.previa-tab{border-collapse:collapse;font-size:12px;white-space:nowrap}
+.previa-tab th,.previa-tab td{border:1px solid var(--linha);padding:4px 8px;text-align:left}
+.previa-tab th{background:var(--fundo2);position:sticky;top:0;font-weight:700}
+.previa-aba{font-weight:700;margin:12px 0 6px;font-size:13px}
+.previa-corte{font-size:12px;color:var(--apagado);padding:6px 2px}
+.previa-tamanho{margin-right:auto;align-self:center;font-size:12px;color:var(--apagado)}
 
 .campo-lbl{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--apagado);font-weight:600;margin-bottom:5px}
 .grade{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -4808,12 +4819,138 @@ async function exportarPdf(docs, func, tudo){
   finally{ progresso(null); carregando(false); }
 }
 
+/* Toda exportação passa por aqui. O arquivo aparece na tela primeiro, e só
+   desce para o computador quando o RH aperta Baixar: o download automático
+   enchia a pasta de arquivos que ninguém chegou a olhar, e um relatório
+   errado só era descoberto depois de aberto. */
+let _ultimoArquivo = null;
 function baixar(blob, nome){
+  _ultimoArquivo = {blob, nome};
+  previaDoArquivo(blob, nome);
+}
+
+/* o download de verdade, atrás do botão da prévia */
+function baixarAgora(blob, nome){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = nome;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+/* Planilha: o SheetJS baixaria sozinho com writeFile, então aqui ela é
+   transformada em arquivo na memória e segue o mesmo caminho do PDF. */
+function planilhaNaTela(wb, nome){
+  const buf = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  baixar(new Blob([buf],
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), nome);
+}
+
+const LIMITE_PREVIA = 400;      /* linhas por aba na tela; o arquivo sai inteiro */
+const LIMITE_PAGINAS_PREVIA = 12;  /* idem para as páginas do PDF */
+
+async function previaDoArquivo(blob, nome){
+  const ehPdf = /\.pdf$/i.test(nome);
+  const url = URL.createObjectURL(blob);
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Conferir antes de baixar</small><h2>${esc(nome)}</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo">
+      <div id="previaCorpo" class="previa-corpo">
+        <div class="aviso info">Montando a prévia…</div>
+      </div>
+    </div>
+    <div class="modal-pe">
+      <div class="previa-tamanho">${esc(tamanhoBonito(blob.size))}</div>
+      <button class="btn sec" id="previaFechar">Fechar</button>
+      <button class="btn" id="previaBaixar">Baixar arquivo</button>
+    </div>`, true);
+
+  const corpo = el.querySelector('#previaCorpo');
+  el.querySelector('#previaFechar').onclick = ()=> el.remove();
+  el.querySelector('#previaBaixar').onclick = ()=>{
+    baixarAgora(blob, nome);
+    toast('Arquivo baixado: '+nome);
+  };
+  /* O endereço temporário do arquivo é liberado quando a janela sai, de
+     qualquer jeito que ela saia — no ✕, no Esc ou no botão Fechar. Não
+     existe evento de "removido", então quem avisa é um observador. */
+  const vigia = new MutationObserver(()=>{
+    if(!el.isConnected){ URL.revokeObjectURL(url); vigia.disconnect(); }
+  });
+  vigia.observe(document.getElementById('modais'), {childList:true});
+
+  if(ehPdf){
+    /* O PDF é desenhado aqui dentro, página por página, com o pdf.js que o
+       sistema já usa para ler cartão-ponto. Com <iframe> o navegador decide
+       o que fazer: o Chromium sem leitor de PDF simplesmente BAIXA o arquivo,
+       que é exatamente o que esta tela existe para evitar — e o navegador de
+       quem tem "sempre baixar PDF" marcado faria o mesmo. */
+    try{
+      await usar('pdfjs');
+      const dados = new Uint8Array(await blob.arrayBuffer());
+      const doc = await pdfjsLib.getDocument({data:dados}).promise;
+      corpo.innerHTML = `<div class="previa-pdf" id="previaPaginas"></div>`;
+      const caixa = corpo.querySelector('#previaPaginas');
+      const quantas = Math.min(doc.numPages, LIMITE_PAGINAS_PREVIA);
+      for(let n=1; n<=quantas; n++){
+        const pg = await doc.getPage(n);
+        const base = pg.getViewport({scale:1});
+        /* largura da janela, com um mínimo para não sair ilegível */
+        const alvo = Math.max(560, caixa.clientWidth || 700);
+        const vp = pg.getViewport({scale: alvo / base.width});
+        const cv = document.createElement('canvas');
+        cv.className = 'previa-pagina';
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+        caixa.appendChild(cv);
+        await pg.render({canvasContext:ctx, viewport:vp}).promise;
+      }
+      if(doc.numPages > quantas){
+        const aviso = document.createElement('div');
+        aviso.className = 'previa-corte';
+        aviso.textContent = 'Mostrando '+quantas+' de '+doc.numPages+
+          ' páginas. O arquivo baixado sai completo.';
+        caixa.appendChild(aviso);
+      }
+    }catch(e){
+      corpo.innerHTML = `<div class="aviso">Não consegui desenhar a prévia deste PDF
+        (${esc(e.message)}), mas o arquivo está pronto: use Baixar arquivo.</div>`;
+    }
+    return el;
+  }
+
+  /* planilha: desenha cada aba como tabela, que é o que dá para conferir
+     dentro do sistema — ninguém lê um .xlsx cru */
+  try{
+    await usar('xlsx');
+    const wb = XLSX.read(await blob.arrayBuffer(), {type:'array'});
+    corpo.innerHTML = wb.SheetNames.map(nomeAba=>{
+      const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba], {header:1, raw:false, defval:''});
+      const mostra = linhas.slice(0, LIMITE_PREVIA);
+      const corte = linhas.length > LIMITE_PREVIA
+        ? `<div class="previa-corte">Mostrando ${LIMITE_PREVIA} de ${linhas.length}
+             linhas. O arquivo baixado sai completo.</div>` : '';
+      const corpoTab = mostra.map((l,i)=>
+        '<tr>'+l.map(c=>`<${i?'td':'th'}>${esc(String(c==null?'':c))}</${i?'td':'th'}>`).join('')+'</tr>'
+      ).join('');
+      return `${wb.SheetNames.length>1 ? `<div class="previa-aba">${esc(nomeAba)}</div>` : ''}
+        <div class="previa-rolagem"><table class="previa-tab">${corpoTab}</table></div>${corte}`;
+    }).join('');
+  }catch(e){
+    corpo.innerHTML = `<div class="aviso">Não consegui montar a prévia desta planilha
+      (${esc(e.message)}), mas o arquivo está pronto: use Baixar arquivo.</div>`;
+  }
+  return el;
+}
+
+function tamanhoBonito(b){
+  if(b < 1024) return b+' bytes';
+  if(b < 1024*1024) return (b/1024).toFixed(0)+' KB';
+  return (b/1024/1024).toFixed(1)+' MB';
 }
 
 /* ==================================================================
@@ -5299,7 +5436,7 @@ async function exportarComissoesExcel(){
   const ws2 = XLSX.utils.aoa_to_sheet(detalhe);
   ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}];
   XLSX.utils.book_append_sheet(wb, ws2, 'DIAS BATIDOS');
-  XLSX.writeFile(wb, 'PREMIACAO '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'PREMIACAO '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -5730,7 +5867,7 @@ async function exportarCandidatosExcel(){
                  {wch:26},{wch:20},{wch:26}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'CANDIDATOS');
-  XLSX.writeFile(wb, 'CANDIDATOS EM TESTE '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'CANDIDATOS EM TESTE '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada com ' + lista.length + ' candidatos.');
 }
 
@@ -5886,7 +6023,7 @@ async function exportarAvisosExcel(){
                  {wch:13},{wch:14},{wch:17},{wch:16}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'AVISO PREVIO');
-  XLSX.writeFile(wb, 'AVISO PREVIO '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'AVISO PREVIO '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -6116,7 +6253,7 @@ async function exportarQuebrasExcel(){
   const ws2 = XLSX.utils.aoa_to_sheet(det);
   ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:14},{wch:12},{wch:14},{wch:20},{wch:34},{wch:14}];
   XLSX.utils.book_append_sheet(wb, ws2, 'LANÇAMENTOS');
-  XLSX.writeFile(wb, 'QUEBRAS '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'QUEBRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -6387,7 +6524,7 @@ async function exportarVtExcel(){
   dinheiroNaColuna(ws, [7, 9], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VT');
-  XLSX.writeFile(wb, 'VT '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
+  planilhaNaTela(wb, 'VT '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
   avisarSemBanco(itens);
   toast('Relatório de VT: '+itens.length+' funcionários.');
 }
@@ -6407,7 +6544,7 @@ async function exportarVrExcel(){
   dinheiroNaColuna(ws, [3, 5], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VR');
-  XLSX.writeFile(wb, 'VR '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
+  planilhaNaTela(wb, 'VR '+compArquivo(S.competencia)+sufixoFilial()+'.xlsx');
   toast('Relatório de VR: '+itens.length+' funcionários.');
 }
 
@@ -7166,7 +7303,7 @@ async function exportarFolhaExcelSimples(){
                           : c==='FILIAL' ? {wch:18} : {wch:16});
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
-  XLSX.writeFile(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada sem a formatação — não consegui carregar o '+
         'recurso de formatação da internet.', true);
 }
@@ -7320,7 +7457,7 @@ async function exportarFolhaBancoExcel(){
     ws['!cols'] = COLS_BANCO.map(c=>({wch:c.larg}));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
-    XLSX.writeFile(wb, 'FOLHA DADOS BANCARIOS '+compArquivo(S.competencia)+
+    planilhaNaTela(wb, 'FOLHA DADOS BANCARIOS '+compArquivo(S.competencia)+
       sufixoFilial()+'.xlsx');
     avisarSemBancoNaFolha(lista);
     toast('Planilha gerada: '+lista.length+' funcionários.');
@@ -7607,7 +7744,7 @@ async function exportarValeExcel(){
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'VALE');
     const sufixo = S.filtroFilial==='TODAS' ? '' : ' '+S.filtroFilial;
-    XLSX.writeFile(wb, 'VALE '+compArquivo(S.competencia)+sufixo+'.xlsx');
+    planilhaNaTela(wb, 'VALE '+compArquivo(S.competencia)+sufixo+'.xlsx');
     const total = itens.reduce((s,x)=>s+x.vale, 0);
     const semV = itens.filter(x=>x.semValor).length;
     toast('Planilha de vale gerada: '+itens.length+' funcionários'+
@@ -8019,7 +8156,7 @@ async function exportarContExcel(){
   ws['!cols'] = [{wch:36},{wch:16}].concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'CONTABILIDADE');
-  XLSX.writeFile(wb, 'CONTABILIDADE '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'CONTABILIDADE '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
@@ -10032,7 +10169,7 @@ async function exportarHorasExcel(){
   ws2['!cols'] = [{wch:36},{wch:12},{wch:6},{wch:18},{wch:34}]
     .concat(Array(6).fill({wch:14})).concat([{wch:30}]);
   XLSX.utils.book_append_sheet(wb, ws2, 'DIA A DIA');
-  XLSX.writeFile(wb, 'HORAS EXTRAS '+compArquivo(S.competencia)+'.xlsx');
+  planilhaNaTela(wb, 'HORAS EXTRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
 
