@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.18c';
+  const VERSAO_APP = '2026.11.19a';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -4846,6 +4846,64 @@ function planilhaNaTela(wb, nome){
     {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), nome);
 }
 
+/* ---- nomes inteiros nos relatórios ----
+   Nome de funcionário não se abrevia. Num relatório de folha é por ele que
+   se confere quem recebeu o quê, e "MARIA APARECIDA DOS S…" não identifica
+   ninguém na hora de assinar ou de responder a uma reclamação. As duas
+   funções abaixo resolvem o corte pelas duas pontas: a coluna cresce até
+   caber o nome mais comprido daquele relatório, e o que ainda assim passar
+   diminui de letra em vez de perder o fim. */
+
+/* Dá à coluna da posição `idx` a largura que o texto mais comprido precisa,
+   tirando o espaço das outras colunas na proporção de cada uma. */
+function largurasComTextoInteiro(larg, idx, textos, fonte, tam, folga){
+  const medir = t => fonte.widthOfTextAtSize(String(t == null ? '' : t), tam);
+  const precisa = Math.max(0, ...textos.map(medir)) + (folga == null ? 8 : folga);
+  if(precisa <= larg[idx]) return larg.slice();
+  const total = larg.reduce((t,w)=>t+w, 0);
+  const outras = total - larg[idx];
+  /* teto: o nome não pode engolir o resto da linha */
+  const alvo = Math.min(precisa, total * 0.5);
+  const ganho = alvo - larg[idx];
+  if(ganho <= 0 || outras <= 0) return larg.slice();
+  return larg.map((w,i)=> i===idx ? alvo : w - ganho * (w/outras));
+}
+
+/* Tamanho de letra que faz o texto caber na largura, sem cortar nada.
+   Só para de diminuir no piso — abaixo disso ficaria ilegível, e aí é
+   melhor o texto encostar na coluna vizinha do que sair pela metade. */
+function tamanhoQueCabe(t, fonte, tam, max, piso){
+  const texto = String(t == null ? '' : t);
+  const p = piso == null ? 4.6 : piso;
+  let s = tam;
+  while(s > p && fonte.widthOfTextAtSize(texto, s) > max) s -= 0.1;
+  return Math.max(Math.round(s*10)/10, p);
+}
+
+/* Alarga cada coluna da planilha até caber o conteúdo mais comprido dela,
+   usando a largura que já estava definida como mínimo. Com largura fixa, um
+   nome maior que a coluna sai cortado na impressão: na tela o RH arrasta a
+   coluna e vê o resto, no papel não há o que arrastar. */
+function colunasQueCabem(ws, minimos){
+  if(!ws || !ws['!ref']) return minimos || [];
+  const faixa = XLSX.utils.decode_range(ws['!ref']);
+  const cols = [];
+  for(let c = faixa.s.c; c <= faixa.e.c; c++){
+    let maior = 0;
+    for(let r = faixa.s.r; r <= faixa.e.r; r++){
+      const cel = ws[XLSX.utils.encode_cell({r, c})];
+      if(!cel) continue;
+      const t = String(cel.w != null ? cel.w : (cel.v == null ? '' : cel.v));
+      t.split('\n').forEach(pedaco=>{ if(pedaco.length > maior) maior = pedaco.length; });
+    }
+    const dado = (minimos || [])[c - faixa.s.c];
+    const base = (dado && dado.wch) || 8;
+    /* teto para uma observação longa não empurrar o resto para fora do papel */
+    cols.push(Object.assign({}, dado, {wch: Math.min(60, Math.max(base, maior + 2))}));
+  }
+  return cols;
+}
+
 const LIMITE_PREVIA = 400;      /* linhas por aba na tela; o arquivo sai inteiro */
 const LIMITE_PAGINAS_PREVIA = 12;  /* idem para as páginas do PDF */
 
@@ -5431,10 +5489,10 @@ async function exportarComissoesExcel(){
 
   const wb = XLSX.utils.book_new();
   const ws1 = XLSX.utils.aoa_to_sheet(resumo);
-  ws1['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:14},{wch:16}];
+  ws1['!cols'] = colunasQueCabem(ws1, [{wch:36},{wch:18},{wch:14},{wch:14},{wch:16}]);
   XLSX.utils.book_append_sheet(wb, ws1, 'RESUMO');
   const ws2 = XLSX.utils.aoa_to_sheet(detalhe);
-  ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}];
+  ws2['!cols'] = colunasQueCabem(ws2, [{wch:36},{wch:18},{wch:12},{wch:14},{wch:30},{wch:16}]);
   XLSX.utils.book_append_sheet(wb, ws2, 'DIAS BATIDOS');
   planilhaNaTela(wb, 'PREMIACAO '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
@@ -5863,8 +5921,8 @@ async function exportarCandidatosExcel(){
   const linhas = lista.map(c=>[c.nome, c.pix, c.cpf, valorNum(c.vr), valorNum(c.vt),
     valorNum(c.diaria), totalDoCandidato(c), c.descricao, c.filial, c.observacoes]);
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
-  ws['!cols'] = [{wch:32},{wch:20},{wch:16},{wch:11},{wch:11},{wch:11},{wch:12},
-                 {wch:26},{wch:20},{wch:26}];
+  ws['!cols'] = colunasQueCabem(ws, [{wch:32},{wch:20},{wch:16},{wch:11},{wch:11},{wch:11},{wch:12},
+                 {wch:26},{wch:20},{wch:26}]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'CANDIDATOS');
   planilhaNaTela(wb, 'CANDIDATOS EM TESTE '+compArquivo(S.competencia)+'.xlsx');
@@ -6019,8 +6077,8 @@ async function exportarAvisosExcel(){
       dataBonita(av.desligamento), dataBonita(av.terminoAviso),
       dataBonita(av.dataPagamento)]));
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:14},{wch:36},{wch:18},{wch:16},{wch:18},{wch:12},
-                 {wch:13},{wch:14},{wch:17},{wch:16}];
+  ws['!cols'] = colunasQueCabem(ws, [{wch:14},{wch:36},{wch:18},{wch:16},{wch:18},{wch:12},
+                 {wch:13},{wch:14},{wch:17},{wch:16}]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'AVISO PREVIO');
   planilhaNaTela(wb, 'AVISO PREVIO '+compArquivo(S.competencia)+'.xlsx');
@@ -6248,10 +6306,10 @@ async function exportarQuebrasExcel(){
 
   const wb = XLSX.utils.book_new();
   const ws1 = XLSX.utils.aoa_to_sheet(resumo);
-  ws1['!cols'] = [{wch:36},{wch:18},{wch:14},{wch:10},{wch:16}];
+  ws1['!cols'] = colunasQueCabem(ws1, [{wch:36},{wch:18},{wch:14},{wch:10},{wch:16}]);
   XLSX.utils.book_append_sheet(wb, ws1, 'RESUMO');
   const ws2 = XLSX.utils.aoa_to_sheet(det);
-  ws2['!cols'] = [{wch:36},{wch:18},{wch:12},{wch:14},{wch:14},{wch:12},{wch:14},{wch:20},{wch:34},{wch:14}];
+  ws2['!cols'] = colunasQueCabem(ws2, [{wch:36},{wch:18},{wch:12},{wch:14},{wch:14},{wch:12},{wch:14},{wch:20},{wch:34},{wch:14}]);
   XLSX.utils.book_append_sheet(wb, ws2, 'LANÇAMENTOS');
   planilhaNaTela(wb, 'QUEBRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
@@ -6519,8 +6577,8 @@ async function exportarVtExcel(){
     itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
     itens.reduce((t,x)=>t+x.d.totalVt,0)];
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:16},{wch:14},{wch:10},{wch:16},{wch:20},{wch:14},
-                 {wch:13},{wch:8},{wch:13}];
+  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:16},{wch:14},{wch:10},{wch:16},{wch:20},{wch:14},
+                 {wch:13},{wch:8},{wch:13}]);
   dinheiroNaColuna(ws, [7, 9], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VT');
@@ -6540,7 +6598,7 @@ async function exportarVrExcel(){
     itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
     itens.reduce((t,x)=>t+x.d.totalVr,0)];
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:20},{wch:14},{wch:13},{wch:8},{wch:13}];
+  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:20},{wch:14},{wch:13},{wch:8},{wch:13}]);
   dinheiroNaColuna(ws, [3, 5], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VR');
@@ -7259,6 +7317,18 @@ async function exportarFolhaExcel(){
         }));
       });
 
+      /* Cada coluna cresce até caber o seu conteúdo. A largura fixa cortava
+         o nome do funcionário na impressão, que é onde não há como arrastar
+         a coluna para ver o resto. */
+      COLUNAS_FOLHA_EXCEL.forEach((c, i)=>{
+        let maior = String(c.titulo).length;
+        g.lista.forEach(f=>{
+          const v = String(valorDaCelulaFolha(f, c) || '');
+          if(v.length > maior) maior = v.length;
+        });
+        ws.getColumn(i+1).width = Math.min(60, Math.max(c.larg, maior + 2));
+      });
+
       /* fonte 10 e grade em tudo, inclusive no título */
       for(let r = 1; r <= ws.rowCount; r++){
         for(let c = 1; c <= COLUNAS_FOLHA_EXCEL.length; c++){
@@ -7298,9 +7368,9 @@ async function exportarFolhaExcelSimples(){
   await usar('xlsx');
   const {cab, linhas, total} = semColunas(tabelaFolhaUnida(), FORA_DO_RELATORIO);
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = cab.map(c=> c==='FUNCIONÁRIO' ? {wch:36}
+  ws['!cols'] = colunasQueCabem(ws, cab.map(c=> c==='FUNCIONÁRIO' ? {wch:36}
                           : c==='OBSERVAÇÕES' ? {wch:34}
-                          : c==='FILIAL' ? {wch:18} : {wch:16});
+                          : c==='FILIAL' ? {wch:18} : {wch:16}));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   planilhaNaTela(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
@@ -7327,7 +7397,11 @@ async function exportarFolhaPdf(){
     const FIXAS = {'FUNCIONÁRIO':132, 'FILIAL':72, 'OBSERVAÇÕES':84};
     const sobra = (L - 2*m) - cab.reduce((t,c)=> t + (FIXAS[c]||0), 0);
     const quantas = cab.filter(c=>!FIXAS[c]).length || 1;
-    const larg = cab.map(c=> FIXAS[c] || sobra/quantas);
+    let larg = cab.map(c=> FIXAS[c] || sobra/quantas);
+    /* a coluna do nome cresce até caber o nome mais comprido desta folha */
+    const iNome = cab.indexOf('FUNCIONÁRIO');
+    if(iNome >= 0) larg = largurasComTextoInteiro(larg, iNome,
+      linhas.map(l=>l[iNome]), fonte, 7);
     const xs = []; let acc = m;
     larg.forEach(w=>{ xs.push(acc); acc += w; });
     const destaque = cab.map(c=>/^VALE MENSAL$/.test(c));
@@ -7392,8 +7466,10 @@ async function exportarFolhaPdf(){
       if(y < m+26) cabecalho();
       l.forEach((t,i)=>{
         const f = destaque[i] ? fonteB : fonte;
-        pg.drawText(encurta(t, f, 7, larg[i]-GAP),
-          {x:xs[i], y, size:7, font:f, color:rgb(.06,.07,.08)});
+        /* diminui a letra se precisar, mas nunca corta o conteúdo */
+        const tam = tamanhoQueCabe(t, f, 7, larg[i]-GAP);
+        pg.drawText(String(t==null?'':t),
+          {x:xs[i], y, size:tam, font:f, color:rgb(.06,.07,.08)});
       });
       y -= 7;
       pg.drawLine({start:{x:m,y}, end:{x:L-m,y}, thickness:.4, color:rgb(.93,.94,.95)});
@@ -7402,8 +7478,8 @@ async function exportarFolhaPdf(){
     if(y < m+26) cabecalho();
     y -= 3;
     total.forEach((t,i)=>{
-      if(t) pg.drawText(encurta(t, fonteB, 7.5, larg[i]-GAP),
-        {x:xs[i], y, size:7.5, font:fonteB});
+      if(t) pg.drawText(String(t),
+        {x:xs[i], y, size:tamanhoQueCabe(t, fonteB, 7.5, larg[i]-GAP), font:fonteB});
     });
     baixar(new Blob([await doc.save()],{type:'application/pdf'}),
       'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.pdf');
@@ -7454,7 +7530,7 @@ async function exportarFolhaBancoExcel(){
     await usar('xlsx');
     const ws = XLSX.utils.aoa_to_sheet(
       [COLS_BANCO.map(c=>c.titulo)].concat(lista.map(f=>COLS_BANCO.map(c=>c.valor(f)))));
-    ws['!cols'] = COLS_BANCO.map(c=>({wch:c.larg}));
+    ws['!cols'] = colunasQueCabem(ws, COLS_BANCO.map(c=>({wch:c.larg})));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
     planilhaNaTela(wb, 'FOLHA DADOS BANCARIOS '+compArquivo(S.competencia)+
@@ -7480,7 +7556,8 @@ async function exportarFolhaBancoPdf(){
     const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
     const L=595.28, A=841.89, m=34;
     const prop = [0.30, 0.11, 0.17, 0.15, 0.15, 0.12];
-    const larg = prop.map(p=>(L-2*m)*p);
+    let larg = prop.map(p=>(L-2*m)*p);
+    larg = largurasComTextoInteiro(larg, 0, lista.map(f=>f.nome), fonte, 7.5);
     const xs = []; let acc = m;
     larg.forEach(w=>{ xs.push(acc); acc += w; });
     const fim = acc, GAP = 5;
@@ -7513,9 +7590,11 @@ async function exportarFolhaBancoPdf(){
     cabecalho();
     lista.forEach(f=>{
       if(y < m+40) cabecalho();
-      COLS_BANCO.forEach((c,i)=>
-        pg.drawText(encurta(c.valor(f) || '—', fonte, 7.5, larg[i]-GAP),
-          {x:xs[i], y, size:7.5, font:fonte, color:rgb(.06,.07,.08)}));
+      COLS_BANCO.forEach((c,i)=>{
+        const t = c.valor(f) || '—';
+        pg.drawText(String(t), {x:xs[i], y, font:fonte, color:rgb(.06,.07,.08),
+          size: tamanhoQueCabe(t, fonte, 7.5, larg[i]-GAP)});
+      });
       y -= 8;
       pg.drawLine({start:{x:m,y}, end:{x:fim,y}, thickness:.4, color:rgb(.93,.94,.95)});
       y -= 12;
@@ -7621,9 +7700,10 @@ async function exportarValePdf(){
     const logo = await doc.embedPng(b64Bytes(LOGO_ESCURA));
 
     const cab  = ['FUNCIONÁRIO','CPF','FILIAL','BANCO','AGÊNCIA','CONTA','VALE'];
-    const larg = [150, 78, 86, 70, 50, 66, 55];
+    let larg = [150, 78, 86, 70, 50, 66, 55];
     const dir  = [false,false,false,false,false,false,true];   /* valor alinhado à direita */
     const L=595.28, A=841.89, m=34;
+    larg = largurasComTextoInteiro(larg, 0, itens.map(x=>x.f.nome), fonte, 7.5);
     const xs = []; let acc = m;
     larg.forEach(w=>{ xs.push(acc); acc += w; });
     const fim = acc;
@@ -7638,7 +7718,9 @@ async function exportarValePdf(){
     /* escreve encostado à direita da coluna: coluna de dinheiro se lê pela
        vírgula, e com os valores desalinhados ninguém confere uma relação */
     const escrever = (t, i, y, f, tam)=>{
-      const texto = encurta(t, f, tam, larg[i]-GAP);
+      /* nada é cortado: o que não couber sai com a letra menor */
+      const texto = String(t == null ? '' : t);
+      tam = tamanhoQueCabe(texto, f, tam, larg[i]-GAP);
       const x = dir[i] ? xs[i] + larg[i] - GAP - f.widthOfTextAtSize(texto, tam) : xs[i];
       pg.drawText(texto, {x, y, size:tam, font:f, color:rgb(.06,.07,.08)});
     };
@@ -7735,7 +7817,7 @@ async function exportarValeExcel(){
     const linhas = itens.map(({f, vale, semValor})=>
       [f.nome, semValor ? '' : -vale, f.filial||'', 'Vale', data]);
     const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas));
-    ws['!cols'] = [{wch:36},{wch:15},{wch:22},{wch:12},{wch:12}];
+    ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:15},{wch:22},{wch:12},{wch:12}]);
     /* a coluna do dinheiro com duas casas, senão o Excel mostra 180 e 180,5 */
     for(let i = 0; i < linhas.length; i++){
       const cel = ws[XLSX.utils.encode_cell({r:i+1, c:1})];
@@ -8153,7 +8235,7 @@ async function exportarContExcel(){
   await usar('xlsx');
   const {cab, linhas, total} = tabelaCont();
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = [{wch:36},{wch:16}].concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]);
+  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:16}].concat(COLS_CONT.map(()=>({wch:16}))).concat([{wch:34}]));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'CONTABILIDADE');
   planilhaNaTela(wb, 'CONTABILIDADE '+compArquivo(S.competencia)+'.xlsx');
@@ -8887,7 +8969,7 @@ async function baixarModelo(){
     ['ANA CLARA MARTINS','DEMITIDO','CAIXA','','','','','CENTRO','','10/01/2022','','Pediu demissão']
   ];
   const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws['!cols'] = [{wch:34},{wch:14},{wch:18},{wch:10},{wch:14},{wch:14},{wch:18},{wch:16},{wch:14},{wch:14},{wch:13},{wch:40}];
+  ws['!cols'] = colunasQueCabem(ws, [{wch:34},{wch:14},{wch:18},{wch:10},{wch:14},{wch:14},{wch:18},{wch:16},{wch:14},{wch:14},{wch:13},{wch:40}]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FUNCIONARIOS');
   XLSX.writeFile(wb, 'MODELO - IMPORTAR FUNCIONARIOS.xlsx');
@@ -10151,8 +10233,8 @@ async function exportarHorasExcel(){
   await usar('xlsx');
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(linhasResumo());
-  ws['!cols'] = [{wch:36},{wch:16},{wch:18},{wch:24},{wch:16}]
-    .concat(Array(11).fill({wch:15})).concat([{wch:40}]);
+  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:16},{wch:18},{wch:24},{wch:16}]
+    .concat(Array(11).fill({wch:15})).concat([{wch:40}]));
   XLSX.utils.book_append_sheet(wb, ws, 'RESUMO');
 
   const det = [['FUNCIONÁRIO','DATA','DIA','DEFINIÇÃO','MARCAÇÕES','TRABALHADO','CH',
@@ -10166,8 +10248,8 @@ async function exportarHorasExcel(){
     d.observacao || ''
   ])));
   const ws2 = XLSX.utils.aoa_to_sheet(det);
-  ws2['!cols'] = [{wch:36},{wch:12},{wch:6},{wch:18},{wch:34}]
-    .concat(Array(6).fill({wch:14})).concat([{wch:30}]);
+  ws2['!cols'] = colunasQueCabem(ws2, [{wch:36},{wch:12},{wch:6},{wch:18},{wch:34}]
+    .concat(Array(6).fill({wch:14})).concat([{wch:30}]));
   XLSX.utils.book_append_sheet(wb, ws2, 'DIA A DIA');
   planilhaNaTela(wb, 'HORAS EXTRAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
