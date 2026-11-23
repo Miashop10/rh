@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.19a';
+  const VERSAO_APP = '2026.11.23a';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -270,6 +270,13 @@ select.campo,input.campo{
 .previa-aba{font-weight:700;margin:12px 0 6px;font-size:13px}
 .previa-corte{font-size:12px;color:var(--apagado);padding:6px 2px}
 .previa-tamanho{margin-right:auto;align-self:center;font-size:12px;color:var(--apagado)}
+/* O que o RH conferiu, na tela do gerente */
+.lista-conf{margin:8px 0 0;padding-left:18px;font-weight:400}
+.lista-conf li{margin:4px 0}
+.motivo-rh{font-size:12px;color:var(--vermelho);margin:2px 0 6px}
+/* Observação livre da aba Férias: cabe uma frase, sem esticar a tabela */
+.tab-aviso .col-obs-livre{min-width:240px}
+.tab-aviso .col-obs-livre input{width:100%}
 
 .campo-lbl{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--apagado);font-weight:600;margin-bottom:5px}
 .grade{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -1049,6 +1056,9 @@ body.celular #conteudo{padding:0}
 .cel-arq img{width:100%;height:100%;object-fit:cover}
 .cel-arq .marca{position:absolute;inset:auto 0 0 0;height:3px;background:var(--ambar)}
 .cel-arq.ok .marca{background:var(--verde)}
+.cel-arq-volta{position:absolute;top:2px;left:2px;background:var(--vermelho);color:#fff;
+  font-size:11px;line-height:1;padding:2px 4px;border-radius:3px}
+.cel-devolvido{font-size:12px;color:var(--vermelho);margin:4px 0 0;font-weight:600}
 .cel-arq-x{
   position:absolute;top:0;right:0;width:22px;height:22px;background:rgba(16,18,21,.72);
   color:#fff;font-size:12px;line-height:22px;text-align:center;
@@ -1235,7 +1245,7 @@ const S = {
   docsFunc:null, docsLista:[], selecao:new Set(), cacheArquivo:{}, cacheDocs:{},
   candidatos:[], candSel:new Set(),
   /* faixa de datas por aba: admissão em Funcionários, saída em Ex-funcionários */
-  datas:{admissao:{de:'',ate:''}, saida:{de:'',ate:''}},
+  datas:{admissao:{de:'',ate:''}, admissaoEx:{de:'',ate:''}, saida:{de:'',ate:''}},
   he:{ calculos:[], calculoId:'', resultados:[] },
   cont:{ competencia:null, linhas:{}, apuracoes:[], comissoes:[], quebras:[],
          autoFeito:null },
@@ -1245,7 +1255,7 @@ const S = {
   zoom:{},
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] },
-  avisos:[]
+  avisos:[], ferias:[], conferidosAntes:[]
 };
 
 const ROTULO_ABA = {
@@ -1258,6 +1268,7 @@ const ROTULO_ABA = {
   FOLHA:'Folha de pagamento',
   VT_VR:'VT/VR',
   AVISO_PREVIO:'Aviso prévio',
+  FERIAS:'Férias',
   CANDIDATOS:'Candidatos em teste'
 };
 
@@ -1815,6 +1826,8 @@ function aplicarCarga(d){
   S.versaoServidor = d.versao || '';
   S.he.calculos = d.calculos || [];
   S.avisos = d.avisos || [];
+  S.ferias = d.ferias || [];
+  S.conferidosAntes = d.conferidosAntes || [];
   S.candidatos = d.candidatos || [];
   S.grupos = d.grupos || [];
   /* A folha e os lançamentos vêm junto com a carga, para a aba abrir na hora
@@ -2132,6 +2145,91 @@ function avisoOpcionais(){
   </div>`;
 }
 
+/* ------------------------------------------------------------------
+   O QUE O RH JÁ CONFERIU
+   A bolinha do documento já ficava verde quando o RH aprovava, mas quem
+   não fosse olhar não ficava sabendo — e o gerente não tem motivo para
+   abrir de novo um documento que ele mesmo mandou. Aqui o sistema vai até
+   ele: ao entrar, uma faixa diz o que foi aceito e o que voltou, com o
+   motivo escrito pelo RH. Fica guardado por usuário no próprio navegador,
+   então sai da frente depois de visto e não volta a cada tela.
+   ------------------------------------------------------------------ */
+function chaveConferencia(){
+  return 'rh-conferencia-vista:' + (S.sessao ? S.sessao.usuario : '');
+}
+function conferenciaVistaEm(){
+  try{ return localStorage.getItem(chaveConferencia()) || ''; }
+  catch(e){ return ''; }
+}
+function marcarConferenciaVista(){
+  try{ localStorage.setItem(chaveConferencia(), new Date().toISOString()); }
+  catch(e){}
+}
+
+/* Documentos que o RH mexeu depois da última vez que este gerente olhou. */
+function conferenciasNovas(){
+  if(!S.sessao || podeAprovar()) return {aceitos:[], devolvidos:[]};
+  const visto = conferenciaVistaEm();
+  const nome = id => (S.funcionarios.find(f=>f.id===id)||{}).nome || '(funcionário)';
+  /* o mês aberto mais o anterior, que é o que o servidor manda: o RH
+     costuma conferir o mês passado já dentro do mês novo */
+  const recentes = (S.documentos||[]).concat(S.conferidosAntes||[])
+    .filter(d=> d.aprovadoEm && String(d.aprovadoEm) > visto);
+  return {
+    aceitos: recentes.filter(d=>d.status==='APROVADO')
+      .map(d=>({tipo:d.tipo, quem:nome(d.funcionarioId), quando:d.aprovadoEm})),
+    devolvidos: recentes.filter(d=>d.status!=='APROVADO' && d.motivoReprova)
+      .map(d=>({tipo:d.tipo, quem:nome(d.funcionarioId),
+                motivo:d.motivoReprova, quando:d.aprovadoEm}))
+  };
+}
+
+function avisoConferencias(){
+  const {aceitos, devolvidos} = conferenciasNovas();
+  if(!aceitos.length && !devolvidos.length) return '';
+  const pedacos = [];
+  if(aceitos.length) pedacos.push(`<b>${aceitos.length}</b> documento${
+    aceitos.length>1?'s':''} aceito${aceitos.length>1?'s':''} pelo RH`);
+  if(devolvidos.length) pedacos.push(`<b>${devolvidos.length}</b> devolvido${
+    devolvidos.length>1?'s':''} para refazer`);
+  /* devolvido é o que exige ação: a faixa fica vermelha quando há algum */
+  return `<div class="aviso ${devolvidos.length?'erro':'opcional'}" id="avisoConferencia">
+    ${devolvidos.length ? '' : '<span class="ponto"></span>'}
+    <span>${pedacos.join(' e ')}.</span>
+    <button class="btn sec mini" id="verConferencia" style="margin-left:auto">Ver quais</button>
+    <button class="btn sec mini" id="okConferencia">Já vi</button>
+  </div>`;
+}
+
+function abrirConferencias(){
+  const {aceitos, devolvidos} = conferenciasNovas();
+  const linha = x => `<li><b>${esc(x.quem)}</b> · ${esc(x.tipo)}${
+    x.motivo ? `<div class="motivo-rh">Motivo do RH: ${esc(x.motivo)}</div>` : ''}</li>`;
+  const el = modal(`
+    <div class="modal-topo">
+      <div><small>Conferência do RH</small><h2>O que mudou nos seus documentos</h2></div>
+      <button class="fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="modal-corpo">
+      ${devolvidos.length ? `<div class="aviso erro" style="display:block">
+        <b>Devolvidos para refazer (${devolvidos.length})</b>
+        <ul class="lista-conf">${devolvidos.map(linha).join('')}</ul>
+        Anexe o documento corrigido no lugar do que foi devolvido.
+      </div>` : ''}
+      ${aceitos.length ? `<div class="aviso info" style="display:block">
+        <b>Aceitos pelo RH (${aceitos.length})</b>
+        <ul class="lista-conf">${aceitos.map(linha).join('')}</ul>
+        Nada a fazer com estes.
+      </div>` : ''}
+    </div>
+    <div class="modal-pe">
+      <button class="btn" id="confOk">Já vi</button>
+    </div>`, true);
+  el.querySelector('#confOk').onclick = ()=>{
+    marcarConferenciaVista(); el.remove(); desenhar();
+  };
+}
+
 function abrirOpcionais(){
   const lista = opcionaisPendentes();
   const el = modal(`
@@ -2230,7 +2328,7 @@ function desenhar(){
     return;
   }
 
-  const aviso = avisoOpcionais();
+  const aviso = avisoOpcionais() + avisoConferencias();
   if(S.aba==='ANEXAR') c.innerHTML = aviso + telaAnexar();
   else if(S.aba==='FUNCIONARIOS') c.innerHTML = aviso + telaFuncionarios();
   else if(S.aba==='EX_FUNCIONARIOS') c.innerHTML = telaEx();
@@ -2240,6 +2338,7 @@ function desenhar(){
   else if(S.aba==='FOLHA') c.innerHTML = telaFolha();
   else if(S.aba==='VT_VR') c.innerHTML = telaVtVr();
   else if(S.aba==='AVISO_PREVIO') c.innerHTML = telaAvisoPrevio();
+  else if(S.aba==='FERIAS') c.innerHTML = telaFerias();
   else if(S.aba==='CANDIDATOS') c.innerHTML = telaCandidatos();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
@@ -2249,6 +2348,7 @@ function desenhar(){
   if(S.aba==='FOLHA'){ ligarFolha(); ligarContabilidade(); }
   if(S.aba==='VT_VR') ligarVtVr();
   if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
+  if(S.aba==='FERIAS') ligarFerias();
   if(S.aba==='CANDIDATOS') ligarCandidatos();
   /* por último: mede a tabela já montada e encolhe o que não couber */
   ligarZoom();
@@ -2289,7 +2389,8 @@ function barraFiltros(comBotao){
       <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
     </div>
     <select class="campo" id="campoFilial">${ops.join('')}</select>
-    ${filtroDeDatas(comBotao ? 'admissao' : 'saida')}
+    ${comBotao ? filtroDeDatas('admissao')
+               : filtroDeDatas('admissaoEx') + filtroDeDatas('saida')}
     ${comBotao&&podeImportar()?'<button class="btn sec" id="btnImportar">Importar planilha</button>':''}
     ${comBotao&&podeAprovar()?`
     <div class="exportacoes">
@@ -2314,32 +2415,36 @@ function barraFiltros(comBotao){
    ------------------------------------------------------------------ */
 function filtroDeDatas(qual){
   const f = S.datas[qual] || {de:'', ate:''};
-  const rotulo = qual === 'admissao' ? 'Admissão' : 'Saída';
+  const rotulo = qual.indexOf('admissao') === 0 ? 'Admissão' : 'Saída';
   const ativo = f.de || f.ate;
   return `<div class="filtro-datas ${ativo?'ligado':''}" data-datas="${qual}">
     <span class="campo-lbl">${rotulo}</span>
-    <input class="entrada" type="date" id="dataDe" value="${esc(f.de)}" title="A partir de">
+    <input class="entrada data-de" type="date" id="dataDe-${qual}" value="${esc(f.de)}"
+      title="A partir de">
     <span class="ate">até</span>
-    <input class="entrada" type="date" id="dataAte" value="${esc(f.ate)}" title="Até">
-    ${ativo ? '<button class="link-acao" id="dataLimpar" title="Tirar o filtro">limpar</button>' : ''}
+    <input class="entrada data-ate" type="date" id="dataAte-${qual}" value="${esc(f.ate)}"
+      title="Até">
+    ${ativo ? '<button class="link-acao data-limpar" title="Tirar o filtro">limpar</button>' : ''}
   </div>`;
 }
 
+/* Pode haver mais de um filtro na barra — a aba Ex-funcionários tem o de
+   admissão e o de saída lado a lado — então liga todos, e não só o primeiro. */
 function ligarFiltroDeDatas(){
-  const cx = document.querySelector('[data-datas]');
-  if(!cx) return;
-  const qual = cx.dataset.datas;
-  const guardar = ()=>{
-    S.datas[qual] = {
-      de: cx.querySelector('#dataDe').value,
-      ate: cx.querySelector('#dataAte').value
+  document.querySelectorAll('[data-datas]').forEach(cx=>{
+    const qual = cx.dataset.datas;
+    const guardar = ()=>{
+      S.datas[qual] = {
+        de: cx.querySelector('.data-de').value,
+        ate: cx.querySelector('.data-ate').value
+      };
+      desenhar();
     };
-    desenhar();
-  };
-  cx.querySelector('#dataDe').onchange = guardar;
-  cx.querySelector('#dataAte').onchange = guardar;
-  const limpar = cx.querySelector('#dataLimpar');
-  if(limpar) limpar.onclick = ()=>{ S.datas[qual] = {de:'', ate:''}; desenhar(); };
+    cx.querySelector('.data-de').onchange = guardar;
+    cx.querySelector('.data-ate').onchange = guardar;
+    const limpar = cx.querySelector('.data-limpar');
+    if(limpar) limpar.onclick = ()=>{ S.datas[qual] = {de:'', ate:''}; desenhar(); };
+  });
 }
 
 /* Sem data gravada o funcionário fica de fora assim que houver filtro: é o
@@ -2353,13 +2458,19 @@ function dentroDoPeriodo(data, faixa){
   return true;
 }
 
+/* qualData aceita uma data ou várias: em Ex-funcionários valem as duas, e
+   quem usa as duas quer a interseção ("admitidos em 2025 que saíram em 2026"). */
 function filtrar(lista, qualData){
   const b = S.busca.trim().toUpperCase();
-  const faixa = qualData ? S.datas[qualData] : null;
+  const quais = !qualData ? [] : (Array.isArray(qualData) ? qualData : [qualData]);
+  const doFuncionario = (f, qual)=> qual === 'saida' ? f.dataDemissao : f.dataAdmissao;
+  /* admissaoEx é a faixa de admissão DA ABA EX, separada da faixa da aba
+     Funcionários: filtrar uma lista com o que foi escolhido na outra
+     esconderia gente sem o RH entender por quê. */
   return lista.filter(f=>
     (S.filtroFilial==='TODAS' || f.filial===S.filtroFilial) &&
     (!b || f.nome.toUpperCase().includes(b)) &&
-    (!faixa || dentroDoPeriodo(qualData === 'saida' ? f.dataDemissao : f.dataAdmissao, faixa))
+    quais.every(q=> dentroDoPeriodo(doFuncionario(f, q), S.datas[q]))
   );
 }
 
@@ -2466,7 +2577,7 @@ function linhaFuncionario(f){
 
 /* ---------- ABA 2: EX-FUNCIONÁRIOS ---------- */
 function telaEx(){
-  const ex = filtrar(S.funcionarios.filter(saiu), 'saida')
+  const ex = filtrar(S.funcionarios.filter(saiu), ['admissaoEx','saida'])
     .sort((a,b)=> (a.filial||'').localeCompare(b.filial||'','pt-BR',{numeric:true})
                   || a.nome.localeCompare(b.nome,'pt-BR'));
   let html = barraFiltros(false);
@@ -2563,6 +2674,8 @@ function ligarDelegacao(){
     if((el = alvo('#folhaValeExcel')))    { exportarValeExcel(); return; }
     if((el = alvo('#folhaVale')))         { exportarValePdf(); return; }
     if((el = alvo('#verOpcionais')))      { abrirOpcionais(); return; }
+    if((el = alvo('#verConferencia')))    { abrirConferencias(); return; }
+    if((el = alvo('#okConferencia')))     { marcarConferenciaVista(); desenhar(); return; }
     if((el = alvo('[data-pend]'))){
       S.pendAberta = S.pendAberta===el.dataset.pend ? null : el.dataset.pend;
       desenhar();
@@ -3979,7 +4092,11 @@ async function abrirDocumentos(funcId){
     carregando(true);
     try{
       await api('aprovarDocumento',{ids, aprovar:true});
-      S.docsLista.forEach(d=>{ if(ids.includes(d.id)) d.status='APROVADO'; });
+      const quando = new Date().toISOString();
+      S.docsLista.forEach(d=>{ if(ids.includes(d.id)){
+        d.status='APROVADO'; d.aprovadoPor = S.sessao.usuario;
+        d.aprovadoEm = quando; d.motivoReprova = '';
+      }});
       sincronizarDocs();
       desenharDocs(el); desenhar();
       toast('Documentos de '+compBonita(S.competencia)+' aprovados.');
@@ -4196,13 +4313,30 @@ function ligarEventosDocs(el){
 }
 
 async function mudarAprovacao(el, id, aprovar){
+  /* Devolver sem dizer por quê obriga o gerente a adivinhar, e ele reenvia o
+     mesmo arquivo. O motivo vai junto e aparece na tela dele. */
+  let motivo = '';
+  if(!aprovar){
+    const resposta = prompt('Por que este documento está sendo devolvido?\n'+
+      'O gerente da filial vai ler este texto.\n\n'+
+      'Ex.: foto cortada, ilegível, documento de outro mês.');
+    if(resposta === null) return;                 /* desistiu */
+    motivo = resposta.trim();
+    if(!motivo) return toast('Escreva o motivo para o gerente saber o que refazer.', true);
+  }
   carregando(true);
   try{
-    await api('aprovarDocumento',{id, aprovar});
+    await api('aprovarDocumento',{id, aprovar, motivo});
     const d = S.docsLista.find(x=>x.id===id);
-    if(d) d.status = aprovar ? 'APROVADO' : 'ANEXADO';
+    if(d){
+      d.status = aprovar ? 'APROVADO' : 'ANEXADO';
+      d.aprovadoPor = S.sessao.usuario;
+      d.aprovadoEm = new Date().toISOString();
+      d.motivoReprova = aprovar ? '' : motivo;
+    }
     sincronizarDocs(); desenharDocs(el); desenhar();
-    toast(aprovar?'Documento aprovado.':'Documento reaberto para correção.');
+    toast(aprovar ? 'Documento aprovado. O gerente verá isso ao entrar no sistema.'
+                  : 'Documento devolvido com o motivo. O gerente verá ao entrar.');
   }catch(e){ toast(e.message,true); } finally{ carregando(false); }
 }
 
@@ -5178,7 +5312,7 @@ function linhaUsuario(u, novo){
   const quantos = u.papel !== 'GERENTE' || !u.filial
     ? null
     : S.funcionarios.filter(f=>chaveFilial(f.filial) === chaveFilial(u.filial)).length;
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','CANDIDATOS'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','FERIAS','CANDIDATOS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -6085,6 +6219,196 @@ async function exportarAvisosExcel(){
   toast('Planilha gerada.');
 }
 
+/* ==================================================================
+   ABA FÉRIAS
+   Mesmo desenho da aba de aviso prévio — a fila de trabalho do RH, com
+   o que o sistema consegue calcular já preenchido em itálico. O que
+   muda: não há demissional (ninguém está saindo), o período tem início
+   e fim, e a observação é campo livre em vez de lista fechada, porque
+   em férias o que se anota não cabe em três opções.
+   ================================================================== */
+function feriasDe(f){
+  const g = S.ferias.find(a=>a.funcionarioId===f.id) || {};
+  const calc = {};
+
+  let inicio = g.inicioFerias || '';
+
+  let termino = g.terminoFerias || '';
+  if(!termino){
+    calc.terminoFerias = true;
+    /* 30 dias corridos contando o primeiro: início + 29 (art. 130 da CLT
+       para quem tem direito ao período integral). O RH corrige quando
+       forem 15, 20 ou períodos fracionados. */
+    termino = dataValida(inicio) ? somarDias(inicio, 29) : '';
+  }
+
+  let pagamento = g.dataPagamento || '';
+  if(!pagamento){
+    calc.dataPagamento = true;
+    /* art. 145 da CLT: até 2 dias antes do início das férias */
+    pagamento = dataValida(inicio) ? somarDias(inicio, -2) : '';
+  }
+
+  return {funcionarioId:f.id, situacao: g.situacao || 'NAO_ENVIADO',
+    inicioFerias: inicio, terminoFerias: termino, dataPagamento: pagamento,
+    observacoes: g.observacoes || '', calc};
+}
+
+function pessoasEmFerias(){
+  const busca = (S.busca||'').trim().toUpperCase();
+  return S.funcionarios
+    .filter(f=>f.status==='FERIAS')
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=>!busca || f.nome.toUpperCase().includes(busca))
+    .map(f=>({f, fe: feriasDe(f)}))
+    /* quem volta primeiro aparece primeiro: é a fila de trabalho */
+    .sort((a,b)=> (a.fe.terminoFerias||'9999').localeCompare(b.fe.terminoFerias||'9999')
+                  || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+}
+
+function telaFerias(){
+  if(!podeAprovar()){
+    return vazio('Férias', 'Somente GERENTE RH e MASTER veem esta aba.');
+  }
+  const lista = pessoasEmFerias();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+      S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <button class="btn sec" id="feExcel">Excel</button>
+  </div>
+  <div class="av-legenda">
+    ${AV_SITUACOES.map(x=>`<span><i style="background:var(${
+      x.v==='NAO_ENVIADO'?'--vermelho':x.v==='ENVIADO'?'--ambar':
+      x.v==='RECEBIDO'?'--laranja':'--verde'})"></i>${x.r}</span>`).join('')}
+    <span style="margin-left:auto">Campo em <i style="background:none"></i><em>itálico</em>
+      foi calculado pelo sistema — pode corrigir.</span>
+  </div>`;
+
+  if(!lista.length){
+    return html + vazio('Ninguém de férias',
+      'Quem estiver com a situação "Férias" no cadastro aparece aqui.');
+  }
+
+  const conta = {};
+  lista.forEach(x=> conta[x.fe.situacao] = (conta[x.fe.situacao]||0)+1);
+  html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap">
+    <span><b>${lista.length}</b> ${lista.length===1?'pessoa':'pessoas'} de férias</span>
+    ${AV_SITUACOES.filter(x=>conta[x.v]).map(x=>
+      `<span>${conta[x.v]} ${x.r.toLowerCase()}</span>`).join(' · ')}
+  </div>`;
+
+  html += `<div class="filial" style="padding:0;overflow:auto">
+    <table class="tab-aviso"><thead><tr>
+      <th class="col-sit">Situação</th><th>Funcionário</th>
+      <th>CPF</th><th>Filial</th>
+      <th>Admissão</th><th>Período das férias</th><th>Término das férias</th>
+      <th>Data pagamento</th><th class="col-obs-livre">Observações</th>
+    </tr></thead><tbody>
+    ${lista.map(x=>linhaFerias(x.f, x.fe)).join('')}
+    </tbody></table></div>`;
+  return html;
+}
+
+function linhaFerias(f, a){
+  const campo = (nome, tipo)=>`<input class="entrada mono${a.calc[nome]?' calculado':''}"
+      type="${tipo}" data-fe="${esc(f.id)}" data-campo="${nome}"
+      value="${esc(a[nome]||'')}"${a.calc[nome]?' title="Preenchido pelo sistema — edite para corrigir"':''}>`;
+  return `<tr class="av-${esc(a.situacao)}" data-fe-linha="${esc(f.id)}">
+    <td class="col-sit"><select class="entrada" data-fe="${esc(f.id)}" data-campo="situacao">
+      ${AV_SITUACOES.map(x=>`<option value="${x.v}" ${a.situacao===x.v?'selected':''}>${x.r}</option>`).join('')}
+    </select></td>
+    <td class="av-nome">${esc(f.nome)}${seloExperiencia(f)}</td>
+    <td class="mono av-cpf">${esc(f.cpf||'—')}</td>
+    <td class="av-filial">${esc(f.filial||'—')}</td>
+    <td class="mono" style="white-space:nowrap">${dataBonita(f.dataAdmissao)}</td>
+    <td>${campo('inicioFerias','date')}</td>
+    <td>${campo('terminoFerias','date')}</td>
+    <td>${campo('dataPagamento','date')}</td>
+    <td class="col-obs-livre"><input class="entrada" data-fe="${esc(f.id)}"
+      data-campo="observacoes" value="${esc(a.observacoes||'')}"
+      placeholder="Anotação livre"></td>
+  </tr>`;
+}
+
+const _feTimers = {};
+function ligarFerias(){
+  document.querySelectorAll('[data-fe]').forEach(c=>{
+    /* o campo de texto salva ao sair dele, não a cada letra digitada */
+    const quando = c.dataset.campo === 'observacoes' ? 'onchange' : 'onchange';
+    c[quando] = ()=>{
+      const id = c.dataset.fe;
+      const f = S.funcionarios.find(x=>x.id===id);
+      if(!f) return;
+      const atual = feriasDe(f);
+      const linha = document.querySelector(`[data-fe-linha="${id}"]`);
+      const dados = {funcionarioId:id, situacao:atual.situacao,
+        inicioFerias:atual.inicioFerias, terminoFerias:atual.terminoFerias,
+        dataPagamento:atual.dataPagamento, observacoes:atual.observacoes};
+      linha.querySelectorAll('[data-fe]').forEach(x=>{ dados[x.dataset.campo] = x.value; });
+      if(c.dataset.campo === 'inicioFerias'){
+        /* mudou a data de partida: o que ainda não foi corrigido à mão é
+           recalculado na hora */
+        const base = Object.assign({}, dados);
+        ['terminoFerias','dataPagamento'].forEach(k=>{ if(atual.calc[k]) delete base[k]; });
+        Object.assign(dados, recalcularFerias(f, base));
+      }
+      linha.className = 'av-' + dados.situacao;
+      guardarFerias(f, dados);
+    };
+  });
+  const b = document.getElementById('feExcel');
+  if(b) b.onclick = exportarFeriasExcel;
+}
+
+function recalcularFerias(f, dados){
+  const guardados = S.ferias.slice();
+  S.ferias = guardados.filter(a=>a.funcionarioId!==f.id).concat([
+    Object.assign({funcionarioId:f.id}, dados)]);
+  const novo = feriasDe(f);
+  S.ferias = guardados;
+  return {terminoFerias:novo.terminoFerias, dataPagamento:novo.dataPagamento};
+}
+
+function guardarFerias(f, dados){
+  clearTimeout(_feTimers[f.id]);
+  _feTimers[f.id] = setTimeout(async ()=>{
+    try{
+      await api('salvarFerias', {ferias:dados}, {silencioso:true});
+      S.ferias = S.ferias.filter(a=>a.funcionarioId!==f.id)
+        .concat([Object.assign({funcionarioId:f.id}, dados)]);
+      desenhar();
+      toast('Férias de '+f.nome.split(' ')[0]+' salvas.');
+    }catch(e){ toast(e.message, true); }
+  }, 600);
+}
+
+async function exportarFeriasExcel(){
+  await usar('xlsx');
+  const lista = pessoasEmFerias();
+  const rotulo = v => (AV_SITUACOES.find(x=>x.v===v)||{}).r || v;
+  const dados = [['SITUAÇÃO','FUNCIONÁRIO','CPF','FILIAL','ADMISSÃO',
+    'PERÍODO DAS FÉRIAS','TÉRMINO DAS FÉRIAS','DATA PAGAMENTO','OBSERVAÇÕES']]
+    .concat(lista.map(({f,fe})=>[rotulo(fe.situacao), f.nome, f.cpf||'', f.filial||'',
+      dataBonita(f.dataAdmissao), dataBonita(fe.inicioFerias),
+      dataBonita(fe.terminoFerias), dataBonita(fe.dataPagamento), fe.observacoes||'']));
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  ws['!cols'] = colunasQueCabem(ws, [{wch:14},{wch:36},{wch:16},{wch:18},{wch:13},
+                 {wch:18},{wch:18},{wch:16},{wch:34}]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'FERIAS');
+  planilhaNaTela(wb, 'FERIAS '+compArquivo(S.competencia)+'.xlsx');
+  toast('Planilha gerada.');
+}
+
 function telaQuebras(){
   if(S.qb.competencia !== S.competencia){
     carregarQuebras();
@@ -6450,11 +6774,13 @@ function telaVtVr(){
         <th class="col-fixa"></th><th></th>
         <th colspan="3" class="g-folha">VALE TRANSPORTE</th>
         <th colspan="2" class="g-cont">VALE REFEIÇÃO</th>
+        <th></th>
       </tr>
       <tr>
         <th class="col-fixa">Funcionário</th><th>Filial</th>
         <th>Valor do VT</th><th>Dias</th><th>Total VT</th>
         <th>Valor do VR</th><th>Total VR</th>
+        <th>Observações</th>
       </tr></thead><tbody>`;
 
   lista.forEach(f=>{
@@ -6474,6 +6800,7 @@ function telaVtVr(){
                  title="${d.vrMes?'valor fechado do mês':'valor por dia'}">
           ${d.vrMes?'<span class="marca-mes">mês</span>':''}</td>
       <td class="mono t-total" data-total-vr="${f.id}">${moeda(d.totalVr)}</td>
+      <td class="t-obs" title="${esc(f.observacoes||'')}">${esc(f.observacoes||'')}</td>
     </tr>`;
   });
 
@@ -6486,6 +6813,7 @@ function telaVtVr(){
       <td></td>
       <td class="mono" id="vvTotalVr"><b>${
         moeda(lista.reduce((s,f)=>s+linhaFolhaDe(f).totalVr,0))}</b></td>
+      <td></td>
     </tr></tfoot></table></div></div>`;
   return html;
 }
@@ -6568,17 +6896,20 @@ async function exportarVtExcel(){
   const itens = linhasDeVtVr().filter(x=>x.d.totalVt > 0 || valorNum(x.d.vtDiario) > 0);
   if(!itens.length) return toast('Nenhum VT lançado em '+compBonita(S.competencia)+'.', true);
   await usar('xlsx');
+  /* A observação do cadastro acompanha o relatório: é nela que o RH anota o
+     que explica um valor fora do comum, e sem ela quem confere pergunta. */
   const cab = ['FUNCIONÁRIO','CPF','BANCO','AGÊNCIA','CONTA','FILIAL','SITUAÇÃO',
-               'VALOR DO VT','DIAS','TOTAL VT'];
+               'VALOR DO VT','DIAS','TOTAL VT','OBSERVAÇÕES'];
   const linhas = itens.map(({f, d})=>[f.nome, f.cpf||'', f.banco||'', f.agencia||'',
     f.conta ? f.conta + (f.tipoConta==='POUPANCA' ? ' (poupança)' : '') : '',
-    f.filial||'', situacaoNoRelatorio(f), valorNum(d.vtDiario), valorNum(d.dias), d.totalVt]);
+    f.filial||'', situacaoNoRelatorio(f), valorNum(d.vtDiario), valorNum(d.dias), d.totalVt,
+    f.observacoes||'']);
   const total = ['TOTAL','','','','','','','',
     itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
-    itens.reduce((t,x)=>t+x.d.totalVt,0)];
+    itens.reduce((t,x)=>t+x.d.totalVt,0), ''];
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
   ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:16},{wch:14},{wch:10},{wch:16},{wch:20},{wch:14},
-                 {wch:13},{wch:8},{wch:13}]);
+                 {wch:13},{wch:8},{wch:13},{wch:34}]);
   dinheiroNaColuna(ws, [7, 9], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VT');
@@ -6591,14 +6922,15 @@ async function exportarVrExcel(){
   const itens = linhasDeVtVr().filter(x=>x.d.totalVr > 0 || valorNum(x.d.vrDiario) > 0);
   if(!itens.length) return toast('Nenhum VR lançado em '+compBonita(S.competencia)+'.', true);
   await usar('xlsx');
-  const cab = ['FUNCIONÁRIO','FILIAL','SITUAÇÃO','VALOR DO VR','DIAS','TOTAL VR'];
+  const cab = ['FUNCIONÁRIO','FILIAL','SITUAÇÃO','VALOR DO VR','DIAS','TOTAL VR','OBSERVAÇÕES'];
   const linhas = itens.map(({f, d})=>[f.nome, f.filial||'', situacaoNoRelatorio(f),
-    valorNum(d.vrDiario), valorNum(d.dias), d.totalVr]);
+    valorNum(d.vrDiario), valorNum(d.dias), d.totalVr, f.observacoes||'']);
   const total = ['TOTAL','','','',
     itens.reduce((t,x)=>t+valorNum(x.d.dias),0),
-    itens.reduce((t,x)=>t+x.d.totalVr,0)];
+    itens.reduce((t,x)=>t+x.d.totalVr,0), ''];
   const ws = XLSX.utils.aoa_to_sheet([cab].concat(linhas).concat([total]));
-  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:20},{wch:14},{wch:13},{wch:8},{wch:13}]);
+  ws['!cols'] = colunasQueCabem(ws,
+    [{wch:36},{wch:20},{wch:14},{wch:13},{wch:8},{wch:13},{wch:34}]);
   dinheiroNaColuna(ws, [3, 5], linhas.length + 1);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'VR');
@@ -7294,7 +7626,20 @@ async function exportarFolhaExcel(){
       const sufixo = sufixoCnpj(fil.cnpj);
       /* o nome da aba não aceita : \ / ? * [ ] nem passa de 31 caracteres */
       const nomeAba = (sufixo || g.nome).replace(/[:\\\/?*\[\]]/g,'-').substring(0,31);
-      const ws = wb.addWorksheet(nomeAba);
+      /* Paisagem: são doze colunas de verbas, e em retrato o Excel quebra a
+         folha ao meio na impressão — o nome fica numa página e os valores
+         na outra. fitToWidth 1 segura tudo na largura de uma folha, sem
+         limitar o número de páginas no comprimento. */
+      const ws = wb.addWorksheet(nomeAba, {
+        pageSetup: {
+          orientation: 'landscape', paperSize: 9,          /* 9 = A4 */
+          fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+          horizontalCentered: true,
+          margins: {left:.3, right:.3, top:.4, bottom:.4, header:.2, footer:.2}
+        }
+      });
+      /* a linha do cabeçalho se repete no alto de cada página impressa */
+      ws.pageSetup.printTitlesRow = '2:2';
       ws.columns = COLUNAS_FOLHA_EXCEL.map(c=>({width:c.larg}));
 
       /* "FILIAL LONDRINA", mas não "FILIAL FILIAL 1" se a loja já se chamar assim */
@@ -8338,7 +8683,11 @@ function telaCelular(){
   const todos = S.funcionarios.filter(estaNaCasa);
   const prontos = todos.filter(f=>situacao(f)!=='vermelho').length;
   const pct = todos.length ? Math.round(prontos/todos.length*100) : 0;
-  let html = `<div class="cel">
+  /* O aviso do que o RH conferiu entra aqui também — e aqui é onde mais
+     importa: o gerente de loja trabalha pelo celular, e esta tela saía
+     antes do aviso ser montado. Quem precisava saber era justamente quem
+     nunca via. */
+  let html = avisoConferencias() + `<div class="cel">
     <div class="cel-capa">
       <div class="cel-capa-topo">
         <span class="cel-filial">${esc(S.sessao.filial || 'Minha filial')}</span>
@@ -8465,18 +8814,28 @@ function linhaDocCelular(f, tipo, docs, opcional){
   const env = _envioCel[chaveEnvio(f.id, tipo)];
   const temArquivo = docs.length > 0;
   const aprovado = temArquivo && docs.every(d=>d.status==='APROVADO');
+  /* Devolvido pelo RH não é a mesma coisa que "ainda não conferido": é
+     trabalho a refazer, e o motivo escrito pelo RH fica logo abaixo. */
+  const devolvido = docs.find(d=>d.status!=='APROVADO' && d.motivoReprova);
   const estado = env ? env.estado
+    : devolvido ? 'devolvido'
     : aprovado ? 'aprovado' : temArquivo ? 'enviado' : opcional ? '' : 'falta';
   const rotulo = {
     indo: 'Enviando…', erro: 'Não enviou', aprovado: 'Conferido',
+    devolvido: 'Devolvido pelo RH',
     enviado: 'Na nuvem', falta: 'Falta'
   }[estado] || 'Opcional';
+  const recadoRh = devolvido
+    ? `<div class="cel-devolvido" title="${esc(devolvido.motivoReprova)}"
+         >↺ ${esc(devolvido.motivoReprova)}</div>` : '';
 
   const tira = docs.length ? `<div class="cel-tira">${docs.map(d=>`
     <span class="cel-arq ${d.status==='APROVADO'?'ok':''}" data-cel-ver="${esc(d.id)}">
       <span id="mini-${esc(d.id)}" style="width:100%;height:100%;display:grid;place-items:center">
         ${miolo(d)}</span>
       <span class="marca"></span>
+      ${d.motivoReprova ? '<span class="cel-arq-volta" title="'+
+        esc(d.motivoReprova)+'">↺</span>' : ''}
       ${aberto && d.status!=='APROVADO'
         ? `<button class="cel-arq-x" data-cel-excluir="${esc(d.id)}" aria-label="Excluir">✕</button>`
         : ''}
@@ -8505,6 +8864,7 @@ function linhaDocCelular(f, tipo, docs, opcional){
         docs.length>1?' · '+docs.length:''}</span>
     </div>
     ${tira}
+    ${recadoRh}
     ${env && env.recado ? `<div class="cel-recado ${env.estado==='erro'?'erro':''}">${esc(env.recado)}</div>` : ''}
     ${acoes}
   </div>`;
@@ -8717,7 +9077,15 @@ function linhaAnexo(f, tipos){
     const g = meus.filter(x=>x.tipo===t);
     const estado = !g.length ? 'falta'
       : g.every(d=>d.status==='APROVADO') ? 'aprovado' : 'anexado';
-    return `<span class="pill ${estado}">${esc(t)}${g.length>1?' ·'+g.length:''}</span>`;
+    /* Devolvido pelo RH é diferente de "ainda não conferido": o motivo
+       escrito vai no próprio documento, onde o gerente vai refazê-lo. */
+    const devolvido = g.find(d=>d.status!=='APROVADO' && d.motivoReprova);
+    const dica = devolvido ? 'Devolvido pelo RH: ' + devolvido.motivoReprova
+      : estado === 'aprovado' ? 'Conferido pelo RH'
+      : estado === 'anexado' ? 'Anexado — aguardando conferência do RH' : '';
+    return `<span class="pill ${devolvido ? 'falta' : estado}"${
+      dica ? ` title="${esc(dica)}"` : ''}>${esc(t)}${
+      devolvido ? ' ↺' : ''}${g.length>1?' ·'+g.length:''}</span>`;
   }).join('')
   /* Opcional também passa pela conferência do RH: fica vermelho enquanto não
      for aprovado e verde depois. Não entra na cor do nome — isso continua
