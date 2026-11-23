@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.23a';
+  const VERSAO_APP = '2026.11.23b';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -275,6 +275,12 @@ select.campo,input.campo{
 .lista-conf li{margin:4px 0}
 .motivo-rh{font-size:12px;color:var(--vermelho);margin:2px 0 6px}
 /* Observação livre da aba Férias: cabe uma frase, sem esticar a tabela */
+.fe-novo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 14px;
+  margin:0 0 10px;background:var(--fundo2);border:1px solid var(--linha);border-radius:10px}
+.fe-novo-rotulo{font-size:13px;font-weight:700;color:var(--apagado)}
+.fe-novo select{min-width:260px;max-width:380px;flex:1 1 260px}
+.fe-novo input[type=date]{width:170px;flex:none}
+.link-acao.perigo{color:var(--vermelho)}
 .tab-aviso .col-obs-livre{min-width:240px}
 .tab-aviso .col-obs-livre input{width:100%}
 
@@ -6227,18 +6233,21 @@ async function exportarAvisosExcel(){
    e fim, e a observação é campo livre em vez de lista fechada, porque
    em férias o que se anota não cabe em três opções.
    ================================================================== */
-function feriasDe(f){
-  const g = S.ferias.find(a=>a.funcionarioId===f.id) || {};
+/* Um pedido de férias é uma linha própria, com id próprio. Não vem da
+   situação do cadastro: esta aba é onde o RH anota QUEM pediu e QUANDO
+   gostaria de sair, antes de qualquer coisa estar decidida. Por isso o
+   mesmo funcionário pode ter mais de uma linha (férias fracionadas,
+   art. 134 da CLT), e alguém que está trabalhando normalmente aparece
+   aqui porque pediu, não porque já saiu. */
+function feriasDoRegistro(g){
   const calc = {};
-
-  let inicio = g.inicioFerias || '';
+  const inicio = g.inicioFerias || '';
 
   let termino = g.terminoFerias || '';
   if(!termino){
     calc.terminoFerias = true;
-    /* 30 dias corridos contando o primeiro: início + 29 (art. 130 da CLT
-       para quem tem direito ao período integral). O RH corrige quando
-       forem 15, 20 ou períodos fracionados. */
+    /* 30 dias corridos contando o primeiro: início + 29 (art. 130 da CLT).
+       O RH corrige quando forem 15, 20 ou períodos fracionados. */
     termino = dataValida(inicio) ? somarDias(inicio, 29) : '';
   }
 
@@ -6249,20 +6258,23 @@ function feriasDe(f){
     pagamento = dataValida(inicio) ? somarDias(inicio, -2) : '';
   }
 
-  return {funcionarioId:f.id, situacao: g.situacao || 'NAO_ENVIADO',
+  return {id:g.id, funcionarioId:g.funcionarioId, situacao: g.situacao || 'NAO_ENVIADO',
     inicioFerias: inicio, terminoFerias: termino, dataPagamento: pagamento,
     observacoes: g.observacoes || '', calc};
 }
 
-function pessoasEmFerias(){
+function listaDeFerias(){
   const busca = (S.busca||'').trim().toUpperCase();
-  return S.funcionarios
-    .filter(f=>f.status==='FERIAS')
-    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
-    .filter(f=>!busca || f.nome.toUpperCase().includes(busca))
-    .map(f=>({f, fe: feriasDe(f)}))
-    /* quem volta primeiro aparece primeiro: é a fila de trabalho */
-    .sort((a,b)=> (a.fe.terminoFerias||'9999').localeCompare(b.fe.terminoFerias||'9999')
+  return (S.ferias||[])
+    .map(g=>({g, f: S.funcionarios.find(x=>x.id===g.funcionarioId)}))
+    /* pedido de alguém que saiu da empresa fica de fora da tela, mas não é
+       apagado: se o cadastro voltar, o pedido volta com ele */
+    .filter(x=> x.f)
+    .filter(x=> S.filtroFilial==='TODAS' || x.f.filial===S.filtroFilial)
+    .filter(x=> !busca || x.f.nome.toUpperCase().includes(busca))
+    .map(x=>({f:x.f, fe: feriasDoRegistro(x.g)}))
+    /* quem sai primeiro aparece primeiro: é a ordem em que o RH trabalha */
+    .sort((a,b)=> (a.fe.inicioFerias||'9999').localeCompare(b.fe.inicioFerias||'9999')
                   || a.f.nome.localeCompare(b.f.nome,'pt-BR'));
 }
 
@@ -6270,10 +6282,16 @@ function telaFerias(){
   if(!podeAprovar()){
     return vazio('Férias', 'Somente GERENTE RH e MASTER veem esta aba.');
   }
-  const lista = pessoasEmFerias();
+  const lista = listaDeFerias();
   const ops = ['<option value="TODAS">Todas as filiais</option>']
     .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
       S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  /* para escolher ao adicionar: quem está na empresa, da filial filtrada */
+  const candidatos = S.funcionarios
+    .filter(estaNaCasa)
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
 
   let html = `
   <div class="barra">
@@ -6285,6 +6303,18 @@ function telaFerias(){
     <select class="campo" id="campoFilial">${ops.join('')}</select>
     <button class="btn sec" id="feExcel">Excel</button>
   </div>
+
+  <div class="fe-novo">
+    <span class="fe-novo-rotulo">Anotar pedido de férias</span>
+    <select class="entrada" id="feQuem">
+      <option value="">Escolha o funcionário…</option>
+      ${candidatos.map(f=>`<option value="${esc(f.id)}">${esc(f.nome)} · ${
+        esc(f.filial||'')}</option>`).join('')}
+    </select>
+    <input class="entrada mono" type="date" id="feQuando" title="Data em que gostaria de sair">
+    <button class="btn" id="feAdicionar">Adicionar</button>
+  </div>
+
   <div class="av-legenda">
     ${AV_SITUACOES.map(x=>`<span><i style="background:var(${
       x.v==='NAO_ENVIADO'?'--vermelho':x.v==='ENVIADO'?'--ambar':
@@ -6294,14 +6324,14 @@ function telaFerias(){
   </div>`;
 
   if(!lista.length){
-    return html + vazio('Ninguém de férias',
-      'Quem estiver com a situação "Férias" no cadastro aparece aqui.');
+    return html + vazio('Nenhum pedido anotado',
+      'Use o campo acima para anotar quem pediu férias e para quando.');
   }
 
   const conta = {};
   lista.forEach(x=> conta[x.fe.situacao] = (conta[x.fe.situacao]||0)+1);
   html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap">
-    <span><b>${lista.length}</b> ${lista.length===1?'pessoa':'pessoas'} de férias</span>
+    <span><b>${lista.length}</b> ${lista.length===1?'pedido':'pedidos'} anotados</span>
     ${AV_SITUACOES.filter(x=>conta[x.v]).map(x=>
       `<span>${conta[x.v]} ${x.r.toLowerCase()}</span>`).join(' · ')}
   </div>`;
@@ -6311,7 +6341,7 @@ function telaFerias(){
       <th class="col-sit">Situação</th><th>Funcionário</th>
       <th>CPF</th><th>Filial</th>
       <th>Admissão</th><th>Período das férias</th><th>Término das férias</th>
-      <th>Data pagamento</th><th class="col-obs-livre">Observações</th>
+      <th>Data pagamento</th><th class="col-obs-livre">Observações</th><th></th>
     </tr></thead><tbody>
     ${lista.map(x=>linhaFerias(x.f, x.fe)).join('')}
     </tbody></table></div>`;
@@ -6320,10 +6350,10 @@ function telaFerias(){
 
 function linhaFerias(f, a){
   const campo = (nome, tipo)=>`<input class="entrada mono${a.calc[nome]?' calculado':''}"
-      type="${tipo}" data-fe="${esc(f.id)}" data-campo="${nome}"
+      type="${tipo}" data-fe="${esc(a.id)}" data-campo="${nome}"
       value="${esc(a[nome]||'')}"${a.calc[nome]?' title="Preenchido pelo sistema — edite para corrigir"':''}>`;
-  return `<tr class="av-${esc(a.situacao)}" data-fe-linha="${esc(f.id)}">
-    <td class="col-sit"><select class="entrada" data-fe="${esc(f.id)}" data-campo="situacao">
+  return `<tr class="av-${esc(a.situacao)}" data-fe-linha="${esc(a.id)}">
+    <td class="col-sit"><select class="entrada" data-fe="${esc(a.id)}" data-campo="situacao">
       ${AV_SITUACOES.map(x=>`<option value="${x.v}" ${a.situacao===x.v?'selected':''}>${x.r}</option>`).join('')}
     </select></td>
     <td class="av-nome">${esc(f.nome)}${seloExperiencia(f)}</td>
@@ -6333,67 +6363,122 @@ function linhaFerias(f, a){
     <td>${campo('inicioFerias','date')}</td>
     <td>${campo('terminoFerias','date')}</td>
     <td>${campo('dataPagamento','date')}</td>
-    <td class="col-obs-livre"><input class="entrada" data-fe="${esc(f.id)}"
+    <td class="col-obs-livre"><input class="entrada" data-fe="${esc(a.id)}"
       data-campo="observacoes" value="${esc(a.observacoes||'')}"
       placeholder="Anotação livre"></td>
+    <td><button class="link-acao perigo" data-fe-excluir="${esc(a.id)}"
+      title="Apagar este pedido">excluir</button></td>
   </tr>`;
 }
 
 const _feTimers = {};
 function ligarFerias(){
   document.querySelectorAll('[data-fe]').forEach(c=>{
-    /* o campo de texto salva ao sair dele, não a cada letra digitada */
-    const quando = c.dataset.campo === 'observacoes' ? 'onchange' : 'onchange';
-    c[quando] = ()=>{
+    c.onchange = ()=>{
       const id = c.dataset.fe;
-      const f = S.funcionarios.find(x=>x.id===id);
-      if(!f) return;
-      const atual = feriasDe(f);
+      const guardado = (S.ferias||[]).find(x=>x.id===id);
+      if(!guardado) return;
+      const atual = feriasDoRegistro(guardado);
       const linha = document.querySelector(`[data-fe-linha="${id}"]`);
-      const dados = {funcionarioId:id, situacao:atual.situacao,
-        inicioFerias:atual.inicioFerias, terminoFerias:atual.terminoFerias,
-        dataPagamento:atual.dataPagamento, observacoes:atual.observacoes};
+      const dados = {id, funcionarioId: guardado.funcionarioId,
+        situacao:atual.situacao, inicioFerias:atual.inicioFerias,
+        terminoFerias:atual.terminoFerias, dataPagamento:atual.dataPagamento,
+        observacoes:atual.observacoes};
       linha.querySelectorAll('[data-fe]').forEach(x=>{ dados[x.dataset.campo] = x.value; });
       if(c.dataset.campo === 'inicioFerias'){
         /* mudou a data de partida: o que ainda não foi corrigido à mão é
            recalculado na hora */
-        const base = Object.assign({}, dados);
-        ['terminoFerias','dataPagamento'].forEach(k=>{ if(atual.calc[k]) delete base[k]; });
-        Object.assign(dados, recalcularFerias(f, base));
+        ['terminoFerias','dataPagamento'].forEach(k=>{ if(atual.calc[k]) dados[k] = ''; });
+        const refeito = feriasDoRegistro(dados);
+        dados.terminoFerias = refeito.terminoFerias;
+        dados.dataPagamento = refeito.dataPagamento;
       }
       linha.className = 'av-' + dados.situacao;
-      guardarFerias(f, dados);
+      guardarFerias(dados);
     };
   });
+
+  document.querySelectorAll('[data-fe-excluir]').forEach(b=> b.onclick = async ()=>{
+    const id = b.dataset.feExcluir;
+    const g = (S.ferias||[]).find(x=>x.id===id);
+    const quem = (S.funcionarios.find(x=>x.id===(g||{}).funcionarioId)||{}).nome || 'este funcionário';
+    if(!confirm('Apagar o pedido de férias de '+quem+'?')) return;
+    carregando(true);
+    try{
+      await api('excluirFerias', {id});
+      S.ferias = S.ferias.filter(x=>x.id!==id);
+      desenhar();
+      toast('Pedido apagado.');
+    }catch(e){ toast(e.message, true); } finally{ carregando(false); }
+  });
+
+  const add = document.getElementById('feAdicionar');
+  if(add) add.onclick = adicionarFerias;
   const b = document.getElementById('feExcel');
   if(b) b.onclick = exportarFeriasExcel;
 }
 
-function recalcularFerias(f, dados){
-  const guardados = S.ferias.slice();
-  S.ferias = guardados.filter(a=>a.funcionarioId!==f.id).concat([
-    Object.assign({funcionarioId:f.id}, dados)]);
-  const novo = feriasDe(f);
-  S.ferias = guardados;
-  return {terminoFerias:novo.terminoFerias, dataPagamento:novo.dataPagamento};
+async function adicionarFerias(){
+  const quem = document.getElementById('feQuem');
+  const quando = document.getElementById('feQuando');
+  if(!quem.value) return toast('Escolha o funcionário.', true);
+  if(!quando.value) return toast('Informe a data em que ele gostaria de sair.', true);
+  const f = S.funcionarios.find(x=>x.id===quem.value);
+
+  /* dois pedidos que se cruzam quase sempre são engano de digitação, mas
+     fracionamento legítimo existe: avisa e deixa o RH decidir */
+  const novoIni = quando.value;
+  const choque = (S.ferias||[]).filter(g=>g.funcionarioId===f.id).find(g=>{
+    const o = feriasDoRegistro(g);
+    return o.inicioFerias && o.terminoFerias &&
+      novoIni <= o.terminoFerias && somarDias(novoIni, 29) >= o.inicioFerias;
+  });
+  if(choque && !confirm(f.nome+' já tem um pedido que cruza com esse período ('+
+      dataBonita(feriasDoRegistro(choque).inicioFerias)+' a '+
+      dataBonita(feriasDoRegistro(choque).terminoFerias)+').\n\nAnotar assim mesmo?')) return;
+
+  const dados = {funcionarioId:f.id, situacao:'NAO_ENVIADO', inicioFerias:novoIni,
+    terminoFerias:'', dataPagamento:'', observacoes:''};
+  carregando(true);
+  try{
+    const r = await api('salvarFerias', {ferias:dados});
+    S.ferias = (S.ferias||[]).concat([Object.assign({id:r.id}, dados)]);
+    quem.value = ''; quando.value = '';
+    desenhar();
+    toast('Pedido de '+f.nome.split(' ')[0]+' anotado para '+dataBonita(novoIni)+'.');
+  }catch(e){ toast(e.message, true); } finally{ carregando(false); }
 }
 
-function guardarFerias(f, dados){
-  clearTimeout(_feTimers[f.id]);
-  _feTimers[f.id] = setTimeout(async ()=>{
+/* Guarda em branco o que o sistema calculou sozinho e o RH não mexeu.
+   Gravar o valor calculado como se fosse digitado fazia o campo deixar de
+   ser automático: o RH corrigia a data de saída depois e o término ficava
+   no dia antigo, sem nada na tela explicando por quê. Em branco, ele volta
+   a ser recalculado sempre que o início mudar. */
+function soOQueFoiMexido(dados){
+  const limpo = Object.assign({}, dados);
+  const automatico = feriasDoRegistro({id:dados.id, funcionarioId:dados.funcionarioId,
+    inicioFerias:dados.inicioFerias});
+  ['terminoFerias','dataPagamento'].forEach(k=>{
+    if(limpo[k] === automatico[k]) limpo[k] = '';
+  });
+  return limpo;
+}
+
+function guardarFerias(dados){
+  dados = soOQueFoiMexido(dados);
+  clearTimeout(_feTimers[dados.id]);
+  _feTimers[dados.id] = setTimeout(async ()=>{
     try{
       await api('salvarFerias', {ferias:dados}, {silencioso:true});
-      S.ferias = S.ferias.filter(a=>a.funcionarioId!==f.id)
-        .concat([Object.assign({funcionarioId:f.id}, dados)]);
+      S.ferias = S.ferias.map(x=> x.id===dados.id ? Object.assign({}, x, dados) : x);
       desenhar();
-      toast('Férias de '+f.nome.split(' ')[0]+' salvas.');
     }catch(e){ toast(e.message, true); }
   }, 600);
 }
 
 async function exportarFeriasExcel(){
   await usar('xlsx');
-  const lista = pessoasEmFerias();
+  const lista = listaDeFerias();
   const rotulo = v => (AV_SITUACOES.find(x=>x.v===v)||{}).r || v;
   const dados = [['SITUAÇÃO','FUNCIONÁRIO','CPF','FILIAL','ADMISSÃO',
     'PERÍODO DAS FÉRIAS','TÉRMINO DAS FÉRIAS','DATA PAGAMENTO','OBSERVAÇÕES']]
@@ -6408,6 +6493,7 @@ async function exportarFeriasExcel(){
   planilhaNaTela(wb, 'FERIAS '+compArquivo(S.competencia)+'.xlsx');
   toast('Planilha gerada.');
 }
+
 
 function telaQuebras(){
   if(S.qb.competencia !== S.competencia){
