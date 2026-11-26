@@ -22,7 +22,7 @@
 </style>
 <script>
   /* Mantenha igual à constante VERSAO do Codigo.gs a cada publicação. */
-  const VERSAO_APP = '2026.11.23b';
+  const VERSAO_APP = '2026.11.26a';
 
   const API = 'https://script.google.com/macros/s/AKfycby4rQxdK27S7N_Iz7v-XdFLCsq25lrHAkNI_W1hXPTp_f0XK5gBL-Nj9EYJqNmVAEQ4/exec';
 
@@ -278,7 +278,21 @@ select.campo,input.campo{
 .fe-novo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 14px;
   margin:0 0 10px;background:var(--fundo2);border:1px solid var(--linha);border-radius:10px}
 .fe-novo-rotulo{font-size:13px;font-weight:700;color:var(--apagado)}
-.fe-novo select{min-width:260px;max-width:380px;flex:1 1 260px}
+.fe-novo select{min-width:240px;max-width:360px;flex:1 1 240px}
+.fe-busca{flex:0 1 230px;min-width:170px}
+.fe-conta{font-size:12px;color:var(--apagado);white-space:nowrap}
+/* Relatórios: a coluna por onde está ordenado fica em destaque, para não se
+   perder de vista qual pergunta a lista está respondendo. */
+.tab-rel{width:100%;border-collapse:collapse;font-size:13px}
+.tab-rel th,.tab-rel td{padding:8px 12px;border-bottom:1px solid var(--linha);text-align:left}
+.tab-rel thead th{background:var(--fundo2);font-size:11px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--apagado);white-space:nowrap}
+.tab-rel th.ord{cursor:pointer;user-select:none}
+.tab-rel th.ord:hover{color:var(--texto)}
+.tab-rel th.ord.ativa{color:var(--texto);background:var(--linha)}
+.tab-rel td.col-ativa{font-weight:700;background:rgba(0,0,0,.03)}
+.tab-rel .rel-nome{font-weight:600}
+.tab-rel tbody tr:hover{background:var(--fundo2)}
 .fe-novo input[type=date]{width:170px;flex:none}
 .link-acao.perigo{color:var(--vermelho)}
 .tab-aviso .col-obs-livre{min-width:240px}
@@ -1197,23 +1211,33 @@ body.celular .cel-ficha-corpo{padding-bottom:200px}
    Somam vários megabytes e servem só para exportar PDF, ler planilha e
    ler cartão ponto. Entrar no sistema não precisa esperar por elas.
    ================================================================== */
+/* Cada biblioteca tem um endereço reserva. Um tropeço da internet numa das
+   lojas derrubava o ExcelJS, e sem ele a folha saía pela versão simples:
+   sem formatação, sem bordas e — o que o RH percebeu — em retrato, porque
+   o SheetJS não sabe escrever orientação de página. Um endereço só era um
+   ponto único de falha para o relatório que vai ao contador. */
 const BIBLIOTECAS = {
   pdflib: {
-    url:'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+    urls:['https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+          'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js'],
     pronta:()=>window.PDFLib
   },
   xlsx: {
-    url:'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    urls:['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+          'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'],
     pronta:()=>window.XLSX
   },
-  /* O SheetJS não escreve fonte nem borda; o ExcelJS escreve. É usado só
-     no relatório da folha, que o contador recebe formatado. */
+  /* O SheetJS não escreve fonte, borda nem orientação de página; o ExcelJS
+     escreve. É o relatório que o contador recebe, e por isso vale insistir. */
   exceljs: {
-    url:'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+    urls:['https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+          'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js',
+          'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'],
     pronta:()=>window.ExcelJS
   },
   pdfjs: {
-    url:'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+    urls:['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+          'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js'],
     pronta:()=>window.pdfjsLib,
     depois:()=>{ pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }
@@ -1225,12 +1249,26 @@ function usar(nome){
   if(b.pronta()) return Promise.resolve();
   if(_pedidas[nome]) return _pedidas[nome];
   _pedidas[nome] = new Promise((ok, erro)=>{
-    const tag = document.createElement('script');
-    tag.src = b.url;
-    tag.onload = ()=>{ if(b.depois) b.depois(); ok(); };
-    tag.onerror = ()=>{ delete _pedidas[nome];
-      erro(new Error('Não consegui carregar um recurso da internet. Tente de novo.')); };
-    document.head.appendChild(tag);
+    const enderecos = b.urls || [b.url];
+    /* tenta um endereço por vez; só desiste quando todos falharem */
+    const tentar = (i)=>{
+      if(i >= enderecos.length){
+        delete _pedidas[nome];
+        return erro(new Error('Não consegui carregar um recurso da internet '+
+          'de nenhum dos endereços. Tente de novo.'));
+      }
+      const tag = document.createElement('script');
+      tag.src = enderecos[i];
+      tag.onload = ()=>{
+        /* carregou o arquivo mas não definiu o que devia: vale como falha */
+        if(!b.pronta()) { tag.remove(); return tentar(i+1); }
+        if(b.depois) b.depois();
+        ok();
+      };
+      tag.onerror = ()=>{ tag.remove(); tentar(i+1); };
+      document.head.appendChild(tag);
+    };
+    tentar(0);
   });
   return _pedidas[nome];
 }
@@ -1261,7 +1299,11 @@ const S = {
   zoom:{},
   com:{ competencia:null, metas:{}, dias:[], metaPadrao:'' },
   qb:{ competencia:null, itens:[] },
-  avisos:[], ferias:[], conferidosAntes:[]
+  avisos:[], ferias:[], conferidosAntes:[],
+  /* a aba Relatórios soma vários meses no servidor; guarda o que veio,
+     o período pedido e por qual coluna a lista está ordenada */
+  rel:{linhas:[], periodo:null, chave:'', ordem:'faltas', crescente:false,
+       carregando:false, erro:''}
 };
 
 const ROTULO_ABA = {
@@ -1275,6 +1317,7 @@ const ROTULO_ABA = {
   VT_VR:'VT/VR',
   AVISO_PREVIO:'Aviso prévio',
   FERIAS:'Férias',
+  RELATORIOS:'Relatórios',
   CANDIDATOS:'Candidatos em teste'
 };
 
@@ -2345,6 +2388,12 @@ function desenhar(){
   else if(S.aba==='VT_VR') c.innerHTML = telaVtVr();
   else if(S.aba==='AVISO_PREVIO') c.innerHTML = telaAvisoPrevio();
   else if(S.aba==='FERIAS') c.innerHTML = telaFerias();
+  else if(S.aba==='RELATORIOS'){
+    c.innerHTML = telaRelatorios();
+    /* busca o resumo na primeira vez que a aba abre, e depois só quando o
+       período muda: somar o ano inteiro a cada desenho seria absurdo */
+    if(!S.rel.carregando && podeAprovar()) carregarRelatorio(false);
+  }
   else if(S.aba==='CANDIDATOS') c.innerHTML = telaCandidatos();
   ligarEventos();
   if(S.aba==='ANEXAR') ligarAnexar();
@@ -2355,6 +2404,7 @@ function desenhar(){
   if(S.aba==='VT_VR') ligarVtVr();
   if(S.aba==='AVISO_PREVIO') ligarAvisoPrevio();
   if(S.aba==='FERIAS') ligarFerias();
+  if(S.aba==='RELATORIOS') ligarRelatorios();
   if(S.aba==='CANDIDATOS') ligarCandidatos();
   /* por último: mede a tabela já montada e encolhe o que não couber */
   ligarZoom();
@@ -5318,7 +5368,7 @@ function linhaUsuario(u, novo){
   const quantos = u.papel !== 'GERENTE' || !u.filial
     ? null
     : S.funcionarios.filter(f=>chaveFilial(f.filial) === chaveFilial(u.filial)).length;
-  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','FERIAS','CANDIDATOS'].map(a=>
+  const chips = ['ANEXAR','FUNCIONARIOS','EX_FUNCIONARIOS','HORAS_EXTRAS','COMISSOES','QUEBRAS','FOLHA','VT_VR','AVISO_PREVIO','FERIAS','CANDIDATOS','RELATORIOS'].map(a=>
     `<button class="chip ${abas.includes(a)?'on':''}" data-chip="${a}">${ROTULO_ABA[a]}</button>`).join('');
   return `<tr data-user="${u.id}" ${novo?'data-novo="1"':''}>
     <td>
@@ -6306,11 +6356,17 @@ function telaFerias(){
 
   <div class="fe-novo">
     <span class="fe-novo-rotulo">Anotar pedido de férias</span>
-    <select class="entrada" id="feQuem">
+    <div class="busca fe-busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="feBusca" placeholder="Buscar pelo nome" autocomplete="off">
+    </div>
+    <select class="entrada" id="feQuem" size="1">
       <option value="">Escolha o funcionário…</option>
-      ${candidatos.map(f=>`<option value="${esc(f.id)}">${esc(f.nome)} · ${
-        esc(f.filial||'')}</option>`).join('')}
+      ${candidatos.map(f=>`<option value="${esc(f.id)}" data-nome="${esc(f.nome.toUpperCase())}"
+        >${esc(f.nome)} · ${esc(f.filial||'')}</option>`).join('')}
     </select>
+    <span class="fe-conta" id="feConta">${candidatos.length} na lista</span>
     <input class="entrada mono" type="date" id="feQuando" title="Data em que gostaria de sair">
     <button class="btn" id="feAdicionar">Adicionar</button>
   </div>
@@ -6412,6 +6468,36 @@ function ligarFerias(){
     }catch(e){ toast(e.message, true); } finally{ carregando(false); }
   });
 
+  /* Com dezenas de nomes por filial, rolar a lista é pior do que digitar
+     três letras. O campo filtra as opções na hora; quando sobra uma só,
+     ela já fica escolhida, para o RH ir direto à data. */
+  const busca = document.getElementById('feBusca');
+  const quem = document.getElementById('feQuem');
+  const conta = document.getElementById('feConta');
+  if(busca && quem){
+    busca.oninput = ()=>{
+      const t = busca.value.trim().toUpperCase();
+      let visiveis = 0, ultimo = '';
+      quem.querySelectorAll('option').forEach(o=>{
+        if(!o.value) return;                       /* o "Escolha…" fica sempre */
+        const bate = !t || (o.dataset.nome||'').includes(t);
+        o.hidden = !bate;
+        if(bate){ visiveis++; ultimo = o.value; }
+      });
+      if(conta) conta.textContent = t ? visiveis + (visiveis===1?' encontrado':' encontrados')
+                                      : visiveis + ' na lista';
+      /* sobrou um só: escolhe sozinho. Se o escolhido sumiu do filtro,
+         desmarca, para ninguém adicionar sem querer quem não está vendo. */
+      if(visiveis === 1) quem.value = ultimo;
+      else if(quem.value){
+        const atual = quem.querySelector(`option[value="${quem.value}"]`);
+        if(atual && atual.hidden) quem.value = '';
+      }
+    };
+    busca.onkeydown = ev=>{ if(ev.key === 'Enter'){ ev.preventDefault();
+      document.getElementById('feQuando').focus(); } };
+  }
+
   const add = document.getElementById('feAdicionar');
   if(add) add.onclick = adicionarFerias;
   const b = document.getElementById('feExcel');
@@ -6445,6 +6531,9 @@ async function adicionarFerias(){
     S.ferias = (S.ferias||[]).concat([Object.assign({id:r.id}, dados)]);
     quem.value = ''; quando.value = '';
     desenhar();
+    /* o foco volta para a busca: o RH costuma anotar vários seguidos */
+    const b = document.getElementById('feBusca');
+    if(b) b.focus();
     toast('Pedido de '+f.nome.split(' ')[0]+' anotado para '+dataBonita(novoIni)+'.');
   }catch(e){ toast(e.message, true); } finally{ carregando(false); }
 }
@@ -6494,6 +6583,189 @@ async function exportarFeriasExcel(){
   toast('Planilha gerada.');
 }
 
+
+/* ==================================================================
+   ABA RELATÓRIOS
+   Resumo por funcionário somando vários meses: quem mais faltou, quem
+   mais se atrasou, quem trouxe mais atestado, quanto cada um custou em
+   quebra. É a aba de olhar de cima, então a ordem importa mais que o
+   valor: qualquer coluna ordena, e começa pela maior.
+
+   A soma vem pronta do servidor. Fazer aqui significaria baixar um ano
+   de lançamentos de todo mundo só para somar — era o que deixava a
+   Folha lenta antes, e não vale repetir o erro.
+   ================================================================== */
+const COLS_REL = [
+  {campo:'atestados',  titulo:'Atestados',  tipo:'conta',
+   dica:'Documentos anexados cujo nome começa por ATESTADO'},
+  {campo:'faltas',     titulo:'Faltas',     tipo:'conta',
+   dica:'Dias lançados na coluna FALTAS da folha de pagamento'},
+  {campo:'atrasosMin', titulo:'Atrasos',    tipo:'hora',
+   dica:'Soma da coluna ATRASOS da folha de pagamento'},
+  {campo:'extrasMin',  titulo:'Horas extras', tipo:'hora',
+   dica:'Horas extras de 50% e 100% somadas'},
+  {campo:'quebra',     titulo:'Quebras',    tipo:'dinheiro',
+   dica:'Soma da coluna QUEBRA DE PRODUTOS da folha de pagamento'},
+  {campo:'premiacao',  titulo:'Premiação',  tipo:'dinheiro',
+   dica:'Soma da coluna PREMIAÇÃO da folha de pagamento'}
+];
+
+function valorRel(v, tipo){
+  if(tipo === 'hora')     return v ? minParaHora(v) : '—';
+  if(tipo === 'dinheiro') return v ? moeda(v) : '—';
+  return v ? String(v) : '—';
+}
+
+/* Doze meses até o mês aberto: é o período que responde "quem mais faltou
+   este ano" sem o RH precisar escolher nada ao entrar. */
+function periodoPadraoRel(){
+  const [a, m] = S.competencia.split('-').map(Number);
+  const d = new Date(a, m - 12, 1);
+  return {de: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
+          ate: S.competencia};
+}
+
+async function carregarRelatorio(forcar){
+  if(!S.rel.periodo) S.rel.periodo = periodoPadraoRel();
+  const chave = S.rel.periodo.de + '|' + S.rel.periodo.ate;
+  if(!forcar && S.rel.chave === chave) return;
+  S.rel.carregando = true; desenhar();
+  try{
+    const r = await api('relatorioResumo', S.rel.periodo, {silencioso:true});
+    S.rel.linhas = r.linhas || [];
+    S.rel.chave = chave;
+  }catch(e){
+    S.rel.erro = e.message;
+    toast(e.message, true);
+  }finally{
+    S.rel.carregando = false; desenhar();
+  }
+}
+
+function linhasDoRelatorio(){
+  const busca = (S.busca||'').trim().toUpperCase();
+  const porId = {};
+  (S.rel.linhas||[]).forEach(l=> porId[l.funcionarioId] = l);
+  return S.funcionarios
+    .filter(f=> S.filtroFilial==='TODAS' || f.filial===S.filtroFilial)
+    .filter(f=> !busca || f.nome.toUpperCase().includes(busca))
+    .map(f=> Object.assign({f}, {atestados:0, faltas:0, atrasosMin:0,
+      extrasMin:0, quebra:0, premiacao:0}, porId[f.id] || {}))
+    /* quem não teve nada no período não some da lista: a ausência de
+       ocorrência é informação, e some sozinha ao ordenar pela coluna */
+    .sort((a,b)=>{
+      const c = S.rel.ordem;
+      const va = a[c] || 0, vb = b[c] || 0;
+      if(va !== vb) return S.rel.crescente ? va - vb : vb - va;
+      return a.f.nome.localeCompare(b.f.nome, 'pt-BR');
+    });
+}
+
+function telaRelatorios(){
+  if(!podeAprovar()){
+    return vazio('Relatórios', 'Somente GERENTE RH e MASTER veem esta aba.');
+  }
+  if(!S.rel.periodo) S.rel.periodo = periodoPadraoRel();
+  const ops = ['<option value="TODAS">Todas as filiais</option>']
+    .concat(S.filiais.map(f=>`<option value="${esc(f.nome)}" ${
+      S.filtroFilial===f.nome?'selected':''}>${esc(f.nome)}</option>`));
+
+  let html = `
+  <div class="barra">
+    <div class="busca">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg>
+      <input id="campoBusca" placeholder="Buscar funcionário pelo nome" value="${esc(S.busca)}">
+    </div>
+    <select class="campo" id="campoFilial">${ops.join('')}</select>
+    <div class="filtro-datas ligado">
+      <span class="campo-lbl">Período</span>
+      <input class="entrada mono" type="month" id="relDe" value="${esc(S.rel.periodo.de)}">
+      <span class="ate">até</span>
+      <input class="entrada mono" type="month" id="relAte" value="${esc(S.rel.periodo.ate)}">
+    </div>
+    <button class="btn sec" id="relExcel">Excel</button>
+  </div>`;
+
+  if(S.rel.carregando){
+    return html + `<div class="vazio"><b>Somando os meses…</b>
+      Isso passa por todos os lançamentos do período.</div>`;
+  }
+
+  const lista = linhasDoRelatorio();
+  if(!lista.length){
+    return html + vazio('Nada no período',
+      'Nenhum funcionário nesta seleção, ou nenhum lançamento entre esses meses.');
+  }
+
+  const soma = c => lista.reduce((t,x)=>t + (x[c]||0), 0);
+  html += `<div class="aviso info" style="display:flex;gap:16px;flex-wrap:wrap">
+    <span><b>${lista.length}</b> funcionários · ${esc(compBonita(S.rel.periodo.de))}
+      a ${esc(compBonita(S.rel.periodo.ate))}</span>
+    ${COLS_REL.map(c=>`<span>${c.titulo}: <b>${valorRel(soma(c.campo), c.tipo)}</b></span>`).join('')}
+  </div>`;
+
+  const seta = c => S.rel.ordem === c ? (S.rel.crescente ? ' ↑' : ' ↓') : '';
+  html += `<div class="filial" style="padding:0;overflow:auto">
+    <table class="tab-rel"><thead><tr>
+      <th class="col-fixa">Funcionário</th><th>Filial</th><th>Admissão</th>
+      ${COLS_REL.map(c=>`<th class="ord ${S.rel.ordem===c.campo?'ativa':''}"
+        data-ord="${c.campo}" title="${esc(c.dica)} — clique para ordenar"
+        >${c.titulo}${seta(c.campo)}</th>`).join('')}
+    </tr></thead><tbody>
+    ${lista.map(x=>`<tr>
+      <td class="col-fixa rel-nome">${esc(x.f.nome)}</td>
+      <td>${esc(x.f.filial||'—')}</td>
+      <td class="mono" style="white-space:nowrap">${dataBonita(x.f.dataAdmissao)}</td>
+      ${COLS_REL.map(c=>`<td class="mono ${S.rel.ordem===c.campo?'col-ativa':''}"
+        >${valorRel(x[c.campo], c.tipo)}</td>`).join('')}
+    </tr>`).join('')}
+    </tbody></table></div>`;
+  return html;
+}
+
+function ligarRelatorios(){
+  document.querySelectorAll('[data-ord]').forEach(th=> th.onclick = ()=>{
+    const c = th.dataset.ord;
+    /* clicar de novo na mesma coluna inverte; coluna nova começa pela maior,
+       que é o que a pergunta "quem teve mais" pede */
+    if(S.rel.ordem === c) S.rel.crescente = !S.rel.crescente;
+    else { S.rel.ordem = c; S.rel.crescente = false; }
+    desenhar();
+  });
+  const de = document.getElementById('relDe');
+  const ate = document.getElementById('relAte');
+  const trocou = ()=>{
+    if(!de.value || !ate.value) return;
+    if(de.value > ate.value) return toast('O mês inicial é depois do final.', true);
+    S.rel.periodo = {de: de.value, ate: ate.value};
+    carregarRelatorio(true);
+  };
+  if(de) de.onchange = trocou;
+  if(ate) ate.onchange = trocou;
+  const b = document.getElementById('relExcel');
+  if(b) b.onclick = exportarRelatorioExcel;
+}
+
+async function exportarRelatorioExcel(){
+  await usar('xlsx');
+  const lista = linhasDoRelatorio();
+  if(!lista.length) return toast('Nada para exportar neste período.', true);
+  const cab = ['FUNCIONÁRIO','FILIAL','ADMISSÃO']
+    .concat(COLS_REL.map(c=>c.titulo.toUpperCase()));
+  const dados = [cab].concat(lista.map(x=>[x.f.nome, x.f.filial||'',
+    dataBonita(x.f.dataAdmissao)].concat(COLS_REL.map(c=>
+      /* número puro na planilha: assim o Excel soma e ordena sozinho.
+         Hora vira hora decimal, que é como se soma hora em planilha. */
+      c.tipo === 'hora' ? Math.round((x[c.campo]||0)/60*100)/100 : (x[c.campo]||0)))));
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  ws['!cols'] = colunasQueCabem(ws, [{wch:36},{wch:20},{wch:13}]
+    .concat(COLS_REL.map(()=>({wch:14}))));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'RELATORIO');
+  planilhaNaTela(wb, 'RELATORIO ' + S.rel.periodo.de + ' a ' + S.rel.periodo.ate + '.xlsx');
+  toast('Horas em decimal (1:30 vira 1,5), para a planilha somar.');
+}
 
 function telaQuebras(){
   if(S.qb.competencia !== S.competencia){
@@ -7805,8 +8077,9 @@ async function exportarFolhaExcelSimples(){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FOLHA');
   planilhaNaTela(wb, 'FOLHA DE PAGAMENTO '+compArquivo(S.competencia)+'.xlsx');
-  toast('Planilha gerada sem a formatação — não consegui carregar o '+
-        'recurso de formatação da internet.', true);
+  toast('Planilha gerada SEM formatação e em modo retrato: não consegui '+
+        'carregar da internet o recurso que desenha bordas e deita a página. '+
+        'Confira a conexão e gere de novo antes de mandar ao contador.', true);
 }
 
 async function exportarFolhaPdf(){
